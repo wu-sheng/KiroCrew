@@ -157,6 +157,7 @@ def _url_payload_command(n: int) -> str:
 #: note names a dotless target refused while a hosts file over 64 KiB is still read
 #: in the background, so a caller retries it rather than treating it as settled.
 #:
+#:
 #: Raised again, from 28,401, for the containment gate's ``pre_resolved`` keyword:
 #: one keyword on ``path_contains_sensitive``, forwarded to the two helpers that
 #: already take it, plus the preconditions it carries written on the keyword
@@ -238,7 +239,13 @@ def _url_payload_command(n: int) -> str:
 #: other branches' start search guards the Telegram branch so a long digit run is
 #: walked once, not once per digit, and the JWT start keeps its run's end so an
 #: overlapping match does not re-walk that run. No pattern moved and no pass changed.
-_PACKAGE_LINE_BUDGET = 28_827
+#:
+#: Raised again, from 28,827, for the standing auto-approve keystone's leaf in ``paths.py``:
+#: ``_CREW_SECRET_LEAVES`` gains ``standing-approval`` so the operator's grant lives on
+#: the read+write keystone floor and no second name in the writable data-home root can
+#: take a write the sealed name refuses. The leaf and its reason are the lines the gate
+#: cannot avoid; no target, no matching rule and no threshold moved.
+_PACKAGE_LINE_BUDGET = 28_851
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
