@@ -241,7 +241,14 @@ export const CHUNK_BUDGETS = {
   // set from a stale-low pre-merge build and never had headroom. Back to the ~5%
   // convention over the true merged measurement (2,041,857 B * 1.05 = 2,143,950 B),
   // so ordinary first-party growth does not re-trip this on the next PR.
-  App: 2094 * KB, // measured 2,041,857 B on main @ 2d4278a18 with route-only pages lazy (~5% headroom)
+  // Re-measured 2026-10-11 on pristine main @ 3dc503d92c: the analyze build emits
+  // this chunk at 2,144,170 B, 86 B under the 2094 KB (2,144,256 B) ceiling, so
+  // main's own first-party growth since 2d4278a18 (+102,313 B, 503 modules) has
+  // spent the whole margin and any change adding more than 86 B to the shell
+  // trips the gate. The structured-attachment change measures +724 B on top of
+  // main (2,144,894 B), none of it behind a lazy boundary. Back to the ~5%
+  // convention over the fresh measurement (2,144,170 B * 1.05 = 2,251,378 B).
+  App: 2199 * KB, // measured 2,144,170 B on main @ 3dc503d92c with route-only pages lazy (~5% headroom)
 
   // Markdown/math/syntax rendering stack (katex, highlight.js, remark/rehype)
   // -- one deliberate `codeSplitting` group, see vite.config.ts.
