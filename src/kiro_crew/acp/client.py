@@ -53,6 +53,7 @@ from kiro_crew import (
     __version__,
     acp_tool_gate,
     agent_scratch,
+    mcp_declined_home,
     model_registry,
     model_scope,
     permission_floor,
@@ -2552,8 +2553,16 @@ class AcpClient:
         RAISES for a backend registered in neither map, and kiro's construction
         path must not gain a failure mode in service of an adapter (H13).
         """
-        if self.backend in MIRRORS:
-            return []
+        return [] if self.backend in MIRRORS else self._kiro_session_servers()
+
+    def _kiro_session_servers(self) -> list[dict[str, Any]]:
+        """The broker stubs plus any ``mcp.json`` server the shared spec cannot carry.
+
+        The second half is empty unless this instance is refused the shared agent
+        home (:mod:`kiro_crew.mcp_declined_home`). It is
+        appended AFTER the stub session token is attached, so a third-party
+        server's environment never receives that token.
+        """
         # A mirror-less member backend's own array (``_mirrorless_member_mounts``)
         # sits beside these stubs on the wire. Its entry carries the member's
         # identity, so a same-named stub is dropped rather than sent twice.
@@ -2562,7 +2571,18 @@ class AcpClient:
             for element in (getattr(self, "_session_mcp_cache", None) or [])
             if isinstance(element, dict)
         }
-        return [s for s in self._pooled_broker_stubs() if s.get("name") not in mounted]
+        stubs = [s for s in self._pooled_broker_stubs() if s.get("name") not in mounted]
+        if self.backend == ACP_BACKEND_KIRO:
+            return stubs + mcp_declined_home.session_servers(
+                self._agent,
+                work_dir=self._work_dir,
+                present={str(e.get("name")) for e in stubs} | {str(n) for n in mounted},
+            )
+        # Kiro only: KAS mounts mcp.json itself and lacks only the tools grant,
+        # which its harness adds; a delivered copy would shadow that native mount
+        # with one the wire carried. Any other host's array is composed from what
+        # it supports.
+        return stubs
 
     def _resolve_session_mcp_servers(self) -> list[dict[str, Any]]:
         """Translate the agent spec into this session's ``mcpServers`` array.
@@ -5194,8 +5214,14 @@ class AcpClient:
             # The pooled broker stubs, for cost alone: they outrank the spec entries,
             # so the probe does not start a private copy of every pooled server.
             # Isolation does not depend on it -- whatever this process starts is
-            # confined to its own transport and reaped with it.
-            mcp_servers=await asyncio.to_thread(self._pooled_mcp_servers),
+            # confined to its own transport and reaped with it. The stubs alone, not
+            # _pooled_mcp_servers: that also carries refused-home mcp.json servers,
+            # which the probe would otherwise start for nothing.
+            mcp_servers=(
+                []
+                if self.backend in MIRRORS
+                else await asyncio.to_thread(self._pooled_broker_stubs)
+            ),
         )
         req_id = await self._send_request(METHOD_SESSION_NEW, params)
         resp = await self._wait_for_response(
