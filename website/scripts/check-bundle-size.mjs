@@ -241,7 +241,16 @@ export const CHUNK_BUDGETS = {
   // set from a stale-low pre-merge build and never had headroom. Back to the ~5%
   // convention over the true merged measurement (2,041,857 B * 1.05 = 2,143,950 B),
   // so ordinary first-party growth does not re-trip this on the next PR.
-  App: 2094 * KB, // measured 2,041,857 B on main @ 2d4278a18 with route-only pages lazy (~5% headroom)
+  // Re-measured 2026-10-11 on pristine main @ 3dc503d92c (analyze build in its
+  // own worktree): this chunk is 2,144,170 B, 86 B under the 2094 KB
+  // (2,144,256 B) ceiling, so main's own growth had spent the whole margin.
+  // The artifact detail toolbar and send-to-session change (#17194) builds it at
+  // 2,147,530 B on top of that base: +3,360 B of first-party code in
+  // ArtifactDetailPage, which App.tsx imports eagerly. Lazy-loading that page
+  // (and ArtifactPopoutFrame) is a separate change outside that PR's scope.
+  // Back to the ~5% convention over the fresh main measurement
+  // (2,144,170 B * 1.05 = 2,251,379 B, rounded up to whole KB).
+  App: 2199 * KB, // measured 2,144,170 B on main @ 3dc503d92c (~5% headroom)
 
   // Markdown/math/syntax rendering stack (katex, highlight.js, remark/rehype)
   // -- one deliberate `codeSplitting` group, see vite.config.ts.
