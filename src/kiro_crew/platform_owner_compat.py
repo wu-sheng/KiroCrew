@@ -256,6 +256,107 @@ def current_user_sid() -> str | None:
     return sid
 
 
+def current_user_is_administrator() -> bool:
+    """Whether the invoking process's token is a member of ``BUILTIN\\Administrators``.
+
+    Answers one question the owner SID alone cannot: a directory an ELEVATED session
+    creates on Windows is owned by ``BUILTIN\\Administrators`` (``S-1-5-32-544``) rather than
+    the user's own SID, so a plain ``owner == me`` compare would refuse a root this very
+    session just created. Trusting an Administrators-owned root is only safe when THIS token
+    is in that group -- otherwise another account's elevated process could have created it.
+
+    Uses ``CheckTokenMembership(NULL, admins)``, which evaluates membership against the
+    current effective token (the ``NULL`` first argument) including group enabling, so it
+    answers the real "am I an admin here" question rather than merely "does the group appear
+    in the token". Spawns nothing, so it is safe on the event loop.
+
+    Fail-closed: ``False`` on POSIX and on ANY failure (no ctypes, API error, allocation
+    failure). A root the membership cannot be confirmed for is treated as not-ours, so the
+    override falls back to the guarded default rather than adopting a root on an unverifiable
+    basis.
+    """
+    from kiro_crew.platform_compat import IS_POSIX
+
+    if IS_POSIX:
+        return False
+    try:
+        return _current_user_is_administrator_unguarded()
+    except Exception:  # noqa: BLE001 - best-effort: refuse (fail-closed) on any failure
+        logger.debug("current_user_is_administrator failed", exc_info=True)
+        return False
+
+
+def _current_user_is_administrator_unguarded() -> bool:
+    """Body of :func:`current_user_is_administrator`; may raise.
+
+    Builds the well-known ``BUILTIN\\Administrators`` SID with
+    ``AllocateAndInitializeSid`` and asks ``CheckTokenMembership`` whether the current
+    effective token holds it, freeing the SID afterwards.
+    """
+    from kiro_crew.platform_compat import ctypes
+
+    try:
+        advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)  # type: ignore[attr-defined]
+    except (OSError, AttributeError):
+        # AttributeError: ctypes has no WinDLL off Windows. Reachable because tests exercise
+        # the Windows branch from Linux by patching IS_POSIX.
+        return False
+
+    # SECURITY_NT_AUTHORITY = {0,0,0,0,0,5}; SECURITY_BUILTIN_DOMAIN_RID = 0x20;
+    # DOMAIN_ALIAS_RID_ADMINS = 0x220. Together they name S-1-5-32-544.
+    SECURITY_NT_AUTHORITY = (wintypes.BYTE * 6)(0, 0, 0, 0, 0, 5)
+    SECURITY_BUILTIN_DOMAIN_RID = 0x00000020
+    DOMAIN_ALIAS_RID_ADMINS = 0x00000220
+
+    advapi32.AllocateAndInitializeSid.argtypes = [
+        ctypes.c_void_p,
+        wintypes.BYTE,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    advapi32.AllocateAndInitializeSid.restype = wintypes.BOOL
+    advapi32.CheckTokenMembership.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_void_p,
+        ctypes.POINTER(wintypes.BOOL),
+    ]
+    advapi32.CheckTokenMembership.restype = wintypes.BOOL
+    advapi32.FreeSid.argtypes = [ctypes.c_void_p]
+    advapi32.FreeSid.restype = ctypes.c_void_p
+
+    admins = ctypes.c_void_p()
+    ok = advapi32.AllocateAndInitializeSid(
+        ctypes.byref(SECURITY_NT_AUTHORITY),
+        wintypes.BYTE(2),
+        wintypes.DWORD(SECURITY_BUILTIN_DOMAIN_RID),
+        wintypes.DWORD(DOMAIN_ALIAS_RID_ADMINS),
+        wintypes.DWORD(0),
+        wintypes.DWORD(0),
+        wintypes.DWORD(0),
+        wintypes.DWORD(0),
+        wintypes.DWORD(0),
+        wintypes.DWORD(0),
+        ctypes.byref(admins),
+    )
+    if not ok:
+        return False
+    try:
+        is_member = wintypes.BOOL(0)
+        # NULL token -> the current effective token, with group enabling honoured.
+        if not advapi32.CheckTokenMembership(wintypes.HANDLE(0), admins, ctypes.byref(is_member)):
+            return False
+        return bool(is_member.value)
+    finally:
+        advapi32.FreeSid(admins)
+
+
 def make_owner_only_dir(path: str | os.PathLike) -> None:
     """Create *path* (with parents) and make it readable only by this user.
 
