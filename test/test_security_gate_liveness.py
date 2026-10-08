@@ -238,7 +238,13 @@ def _url_payload_command(n: int) -> str:
 #: other branches' start search guards the Telegram branch so a long digit run is
 #: walked once, not once per digit, and the JWT start keeps its run's end so an
 #: overlapping match does not re-walk that run. No pattern moved and no pass changed.
-_PACKAGE_LINE_BUDGET = 28_827
+#:
+#: Raised again, from 28,827, for one write-protected TARGET in ``paths.py``: the microvm
+#: lane's crew records, whose rows carry the VM id ``teardown`` hands to
+#: ``launcher.terminate``. Ten lines, of which four are the comprehension and six the
+#: reason every entry in that list carries. No matching rule, no threshold and no pass
+#: moved -- a target was added to a list the gate already walks.
+_PACKAGE_LINE_BUDGET = 28_837
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
