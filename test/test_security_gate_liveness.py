@@ -238,7 +238,27 @@ def _url_payload_command(n: int) -> str:
 #: other branches' start search guards the Telegram branch so a long digit run is
 #: walked once, not once per digit, and the JWT start keeps its run's end so an
 #: overlapping match does not re-walk that run. No pattern moved and no pass changed.
-_PACKAGE_LINE_BUDGET = 28_827
+#:
+#: Raised for the recursive-force ``rm`` deletion floor in the ``rm_floor.py`` sibling
+#: module: an argv-structural gate that reads the ``rm`` command's own argv (flags in
+#: any position/spelling, the ``$HOME``/``~``/glob targets, brace-expanded flags and
+#: operands), a UNION with the two catalog regexes kept LIVE as a fail-closed
+#: deny-net. It carries the GPT 6.1 over-refusal fixes to the floor: a
+#: piped/compound substitution body and a multi-operand producer body left
+#: unresolved, a read-only ``git`` search's arguments read as data, a case-variant
+#: home sibling kept distinct on a case-sensitive filesystem, and a bounded
+#: parameter-expansion rejoin. It also keeps a command-substitution ``)`` from
+#: ending the ``rm`` argv (so a trailing target after ``$(…)`` is still classified)
+#: and classifies each command line of a multi-line ``-c`` payload on its own. Home
+#: equality lowercases both sides (a home path with an uppercase letter still
+#: denies), the ``${`` boundary scan stops rescanning past an unclosed run, a
+#: length-changing lowercase still neutralizes a non-``HOME`` variable, an
+#: index-only ``git rm --cached`` and a redirect source/target are not floor rm
+#: targets.
+#:
+#: Rebased onto main, the budget covers both main's growth and this module: the
+#: package total is the sum of main's security files plus ``rm_floor.py``.
+_PACKAGE_LINE_BUDGET = 32_960
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
