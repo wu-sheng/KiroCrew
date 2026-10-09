@@ -241,7 +241,18 @@ export const CHUNK_BUDGETS = {
   // set from a stale-low pre-merge build and never had headroom. Back to the ~5%
   // convention over the true merged measurement (2,041,857 B * 1.05 = 2,143,950 B),
   // so ordinary first-party growth does not re-trip this on the next PR.
-  App: 2094 * KB, // measured 2,041,857 B on main @ 2d4278a18 with route-only pages lazy (~5% headroom)
+  // Re-baselined to 2201 KB for the folder-conductor sidebar layout (#18335).
+  // Attribution measured, not assumed: pristine main @ 6548d1dc6d builds this
+  // chunk at 2,144,170 B (86 B under the 2094 KB ceiling -- the chunk had no room
+  // left), and this branch on top of it builds 2,145,966 B, 1,710 B over. So the
+  // branch's own cost is 1,796 B of first-party sidebar-shell code -- the pinned
+  // conductor card, its detector and the preview flag, wired straight into the
+  // always-loaded chat-route shell (ChatSidebar.tsx), the same no-lazy-boundary
+  // shape the notes above document; there is no import() split to move it behind.
+  // Back to the ~5% convention over the merged measurement
+  // (2,145,966 B * 1.05 = 2,253,264 B), so ordinary first-party growth does not
+  // re-trip this on the next PR.
+  App: 2201 * KB, // measured 2,145,966 B on this branch (main @ 6548d1dc6d: 2,144,170 B); ~5% headroom
 
   // Markdown/math/syntax rendering stack (katex, highlight.js, remark/rehype)
   // -- one deliberate `codeSplitting` group, see vite.config.ts.
