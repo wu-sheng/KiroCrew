@@ -241,7 +241,15 @@ export const CHUNK_BUDGETS = {
   // set from a stale-low pre-merge build and never had headroom. Back to the ~5%
   // convention over the true merged measurement (2,041,857 B * 1.05 = 2,143,950 B),
   // so ordinary first-party growth does not re-trip this on the next PR.
-  App: 2094 * KB, // measured 2,041,857 B on main @ 2d4278a18 with route-only pages lazy (~5% headroom)
+  // Re-measured on main @ f07162523 (a clean analyze build of main's own tip,
+  // from a backend-only PR that touches no website file and builds the
+  // byte-identical chunk): 2,144,668 B (2094.4 KB), 412 B over the 2094 KB
+  // ceiling set from the 2,041,857 B measurement above -- +102,811 B of
+  // first-party growth across the website commits since 2d4278a18, none of
+  // them a new library, so once again the gate failed on the merge ref of a
+  // backend-only PR rather than on the change that grew the chunk. Back to
+  // ~5% over the measured size (2,144,668 B * 1.05 = 2,251,901 B).
+  App: 2200 * KB, // measured 2,144,668 B on main @ f07162523 (~5% headroom)
 
   // Markdown/math/syntax rendering stack (katex, highlight.js, remark/rehype)
   // -- one deliberate `codeSplitting` group, see vite.config.ts.
