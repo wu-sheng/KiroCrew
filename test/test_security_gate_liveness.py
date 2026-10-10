@@ -238,7 +238,18 @@ def _url_payload_command(n: int) -> str:
 #: other branches' start search guards the Telegram branch so a long digit run is
 #: walked once, not once per digit, and the JWT start keeps its run's end so an
 #: overlapping match does not re-walk that run. No pattern moved and no pass changed.
-_PACKAGE_LINE_BUDGET = 28_827
+#:
+#: Raised again, from 28,827, for the remote-command ``-R`` fix: a single-field
+#: reverse-SOCKS value is a self dial unless it PROVABLY cannot be a port
+#: (``_might_be_forward_port`` fails closed -- only a literal ``/``-bearing token
+#: with no shell metacharacter is a non-forward value, since OpenSSH takes ``0``
+#: and service names and the shell expands braces/globs/variables/``${p%/}`` to a
+#: port). A TWO-field value always fails closed (its last field can be a local
+#: socket path, a real reverse forward in). So ``gh ... -R owner/repo`` is allowed
+#: while ``-R 2222:localhost:22``, ``-R 0`` and ``-R 2222:/run/docker.sock`` fail
+#: closed. ``mksh`` also joins ``_NESTED_SHELL_PROGRAMS`` so its ``-c`` payload is
+#: walked like ``ksh``.
+_PACKAGE_LINE_BUDGET = 28_893
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
