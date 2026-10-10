@@ -899,8 +899,12 @@ def _operator_confirms(facts: GateFacts, grant_targets: tuple[str, ...]) -> bool
 
     Matched against every spelling the grant could be keyed on -- the grant
     targets, the title, the normalized name and, for an MCP call, the bare
-    ``@server`` -- because this can only withhold a grant, never give one.
+    ``@server`` -- because this can only withhold a grant, never give one. A
+    list the load could not read (``confirm_tools_unknown``) names every call,
+    whatever patterns the load kept.
     """
+    if getattr(facts.config, "confirm_tools_unknown", False):
+        return True
     patterns = facts.config.confirm_tools
     if not patterns:
         return False
@@ -1051,6 +1055,12 @@ def _tier_read_only(facts: GateFacts, tier: GateTier) -> ToolHookResult | None:
         ):
             return ToolHookResult.auto_approve(read_only=True)
         return ToolHookResult.allow()
+    # An operator's confirm list asks for what it names whatever the call says
+    # about itself: the ACP kind and the title below are agent-influenced, so a
+    # confirm-listed MCP call is never settled by them. While the list is unknown
+    # every MCP call asks; built-ins keep the classifier.
+    if call.mcp_server and _operator_confirms(facts, (call.title, facts.normalized)):
+        return None
     # Trust the SEMANTIC kind, as an ALLOW-list. ``kind`` is passed through
     # verbatim from the ACP ``kind`` field (``acp/_dispatch.py``), so it is an
     # arbitrary agent-influenced string and a DENYLIST of mutating kinds can never
