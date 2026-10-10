@@ -238,7 +238,126 @@ def _url_payload_command(n: int) -> str:
 #: other branches' start search guards the Telegram branch so a long digit run is
 #: walked once, not once per digit, and the JWT start keeps its run's end so an
 #: overlapping match does not re-walk that run. No pattern moved and no pass changed.
-_PACKAGE_LINE_BUDGET = 28_827
+#:
+#: Raised to 29,942 for ``publish_program_word.py``: the git-publish floor reads
+#: program position on quote-aware shell words, so a push run under a program word
+#: the shell resolves at run time (``"$G"``, ``g?t``, a substitution) is found in
+#: every program position -- after newlines, glued and background separators,
+#: inside compound constructs, behind precommands and redirections -- and judged
+#: by its target when its argv is known. Substitution bodies are read in their
+#: own quote context, comments and heredoc bodies are cut before the read and
+#: each body is read as command text of its own, and quoting is read per
+#: character in a glob. The
+#: reading is a security-deciding predicate, so it cannot leave the package; it
+#: sits in its own module so ``argv_floor`` stays under the per-module cap.
+#:
+#: Raised again, from 29,942, for two reach closures in ``publish_program_word.py``:
+#: a precommand split-string option (``env -S``/``--split-string``) builds the
+#: program and argv out of a string the floor cannot split back into words, so a
+#: publish behind it is unverifiable; and a ``git`` inert companion carrying
+#: ``--output``/``--output-directory`` writes a file a heredoc sink then runs, so
+#: its body is read as command text. One option table and helper, one output-option
+#: pattern and its check, with their reasons. No pass widened and no threshold moved.
+#:
+#: Raised again, from 29,979, for four more reach closures in `publish_program_word.py`:
+#: a split-string option is recognised in its attached (`--split-string=x`) and
+#: abbreviated (`--split`) spellings and a runtime-resolved precommand option is
+#: treated as a possible argv-changer, so neither hides the publish behind it; an
+#: unquoted expansion that can expand to nothing (`${x:-}`) does not settle program
+#: position, so the reachable program word after it is judged; and a `case` inside a
+#: command substitution is read by tracking `case`/`esac`, so its pattern parens are
+#: not read as the body's close and a real push in it is found while a command that
+#: only prints `push` is allowed. One regex, one helper, two short branches and a
+#: counter, with their reasons. No pass widened and no threshold moved.
+#:
+#: Raised again, from 30,019, for three more reach closures in `publish_program_word.py`:
+#: a quoted expansion that yields zero words (`"$@"`, `"${a[@]}"`) is treated as able to
+#: vanish like the unquoted forms; a precommand option value is consumed before it is read
+#: as a reserved word, so `env -u function` does not hide the program after it; and `case`
+#: and `esac` are read only at command position, so an argument spelled `case` does not
+#: open a compound command. One regex, one command-position helper, one early branch and
+#: two guards, offset by the dead option-value branches removed. No pass widened and no
+#: threshold moved.
+#:
+#: Raised again, from 30,061, for the full set of vanishing program words: a braced or
+#: concatenated zero-word positional/array expansion (`"${@}"`, `"$@""$@"`) and an
+#: unquoted glob that matches nothing under `nullglob` also leave program position to the
+#: next word, judged at both early returns; and a detached-long split-string option takes
+#: the next word while a short option's attachment is read from the option itself. One
+#: widened pattern, a glob check in the vanish test and one extra guard. No pass widened
+#: and no threshold moved.
+#:
+#: Raised again, from 30,071, for three reads a review found: a word that is wholly a
+#: redirection (``&>f``, ``{fd}>f``) is kept whole so splitting invents no program word;
+#: a word that can vanish leaves program position to the next word inside a precommand
+#: too, and a zero-word sliced positional (``"${@:2}"``) is recognised; and the sink
+#: option checks dequote their words and withhold the exemption when an option name
+#: carries an unresolved expansion. One guard, one moved branch, one widened pattern and
+#: a dequoting option helper. No pass widened and no threshold moved.
+#:
+#: Raised again, from 30,097, for the vanishing-word pattern rewrite: its name run and
+#: single special parameter are separate alternatives so no `$` sits in a repeated class,
+#: which removes the exponential backtracking a scan flagged. Comment only; the match set
+#: is unchanged but for dropping literal-bearing spellings. No pass widened, no threshold moved.
+#:
+#: Raised again, from 30,100, so a double-quoted `$(cat <<'EOF' ...)` printed into a sink
+#: argument (`git commit -m`, `gh pr create --body`) reads as message text: the substitution
+#: records whether it sits in double quotes, a strict printer pattern recognises a lone
+#: `cat` of one quoted-delimiter heredoc, and `is_denied` skips the payload walk's lifted
+#: copy of a printer its own source already read as data. One field, one pattern, three
+#: short helpers and one filter. No pass widened and no threshold moved.
+#:
+#: Raised again, from 30,275, so a backslash path whose literal basename names another
+#: program (`"$env:ProgramFiles\...\docker.exe" push img`) is that program on both readings
+#: of `\`: read as an escape, the word's `$` counts only while the literal text after its
+#: last expansion could end `git` or `git.exe`; and so a precommand option whose letter
+#: cases differ on taking a value (`xargs -l`/`-L`, `sudo -p`/`-P`) is read both ways on
+#: the lowercased text, a publish either reading finds being found. Two helpers, one name
+#: pattern, one option table and a split of the basename test. No pass widened and no
+#: threshold moved.
+#:
+#: Raised again, from 30,356, for two review findings: a word that can expand to no word is
+#: recognised at any nesting and with several zero-word expansions in one pair of quotes
+#: (`${x:-${y:-}}`, `"$@$@"`), or as an extglob under `nullglob`, so it leaves program
+#: position to the next word; and the sink editor check matches every abbreviation git and
+#: gh accept (`--edi`). One scanning helper replacing one pattern, two small patterns and
+#: a widened editor pattern. No pass widened and no threshold moved.
+#:
+#: Raised again, from 30,384, for four review findings and one printer spelling: a word
+#: that may vanish may instead be a program running the words after it, so a publish after
+#: it has no known argv; an open precommand's operand spelled like a reserved word
+#: (`flock function`) is an operand; a short-option cluster whose leading letters carry `e`
+#: (`-eF-`) is an editor option; a glob program word is matched against `git.exe` too; and
+#: a printer with an unquoted delimiter is message text when its body has no `$`, backtick
+#: or backslash. Guards and pattern changes only. No pass widened and no threshold moved.
+#:
+#: Raised again, from 30,399, so a runtime program judged by its target cannot hide a
+#: publish an argument carries: the program may be `eval`, so an argument that is itself a
+#: publish makes the argv unknown. One guard. No pass widened and no threshold moved.
+#:
+#: Raised again, from 30,402, for three more review findings: a `-c` value (which,
+#: lowercased, `-C` cannot be told from) is not accepted as one target-neutral
+#: expansion, since `remote.origin.push` can redirect a source-only refspec; sink option
+#: words are read after ANSI-C decoding, and a word that can expand to an option counts;
+#: and a git sink's template option (`-t`, `--template`) voids the exemption, since the
+#: template opens the editor. One flag set, one pattern and two guards. No pass widened
+#: and no threshold moved.
+#:
+#: Raised again, from 30,418, so quoted text stays text and a prefix payload is read: the
+#: sink-voiding syntax and function check read the text with bash's quoting, so a `>`
+#: or `()` in a single-quoted title leaves the exemption standing while `$(` inside
+#: double quotes still voids it; the floor's per-line segments mark each line of a data
+#: span so no runtime program word is read in a message line; and a prefix word naming
+#: `push` (a shell's `-c` payload) leaves a runtime publish's argv unknown. Two helpers
+#: and one guard. No pass widened and no threshold moved.
+#:
+#: Raised again, from 30,472, for four review findings: the `eval` guard reads the line a
+#: runtime publish's arguments join to, not each argument alone; a runtime word not
+#: followed by `push` may be a dispatcher (`env`), so program position stays open with the
+#: argv unknown; and a POSIX bracket expression in a glob program word (`g[[:lower:]]t`)
+#: counts as able to name git. One pattern and two guards. No pass widened and no
+#: threshold moved.
+_PACKAGE_LINE_BUDGET = 30_476
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
