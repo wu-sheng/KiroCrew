@@ -11,15 +11,16 @@ import type { MemberSignals } from './rosterFilter'
  * search, the pick, and the create door — and, since the folded roster is the
  * desktop norm, the live signals the column used to carry: each row's working
  * / needs-you / unread cue, the chip's own needs-you dot for a crewmate other
- * than the open one, and the unread column under the chip (issue #19045): one
- * pill per unread crewmate, capped, each opening that thread.
+ * than the open one, and `CrewmateUnreadColumn` (issue #19045) -- the page
+ * draws it under the chip: one pill per unread crewmate, capped, each opening
+ * that thread, the "+N" pill asking the page to open the chip's list.
  */
 
 vi.mock('../../components/CrewStateAvatar', () => ({
   default: ({ seed }: { seed: string }) => <span data-testid="avatar-stub">{seed}</span>,
 }))
 
-import CrewmateSwitcher from './CrewmateSwitcher'
+import CrewmateSwitcher, { CrewmateUnreadColumn } from './CrewmateSwitcher'
 
 const row = (name: string, overrides: Partial<MemberRosterRow> = {}): MemberRosterRow => ({
   name, slug: name.toLowerCase().replace(/\s+/g, '-'), bound: true, slot_key: `member-${name}`, running: false,
@@ -292,12 +293,27 @@ describe('CrewmateSwitcher live signals', () => {
   })
 })
 
-describe('CrewmateSwitcher unread column', () => {
-  const pills = () => screen.queryAllByTestId('crewmate-switcher-unread-pill')
+describe('CrewmateSwitcher opens on an outside request', () => {
+  it('a bumped openRequest opens the list; the mount value does not', async () => {
+    const { rerender } = render(<CrewmateSwitcher members={MEMBERS} defaultAgent="" activeName="scribe" onPick={vi.fn()} openRequest={3} />)
+    expect(screen.queryByTestId('crewmate-switcher-list')).toBeNull()
+    rerender(<CrewmateSwitcher members={MEMBERS} defaultAgent="" activeName="scribe" onPick={vi.fn()} openRequest={4} />)
+    expect(await screen.findByTestId('crewmate-switcher-list')).toBeInTheDocument()
+  })
+})
 
-  it('hangs one named pill per unread crewmate under the chip, in roster order, and picks on click', () => {
-    const { onPick } = setup({ signals: signalsBy({ fixer: { unread: true }, oncall: { unread: true } }) })
-    expect(screen.getByTestId('crewmate-switcher-unread-column')).toBeInTheDocument()
+describe('CrewmateUnreadColumn', () => {
+  const pills = () => screen.queryAllByTestId('crewmate-switcher-unread-pill')
+  const column = (props: Partial<Parameters<typeof CrewmateUnreadColumn>[0]> = {}) => {
+    const onPick = vi.fn()
+    const onMore = vi.fn()
+    const view = render(<CrewmateUnreadColumn members={MEMBERS} defaultAgent="" activeName="scribe" onPick={onPick} onMore={onMore} {...props} />)
+    return { onPick, onMore, ...view }
+  }
+
+  it('one named pill per unread crewmate other than the open one, in roster order; a click picks it', () => {
+    const { onPick } = column({ signals: signalsBy({ fixer: { unread: true }, oncall: { unread: true } }) })
+    expect(screen.getByTestId('crewmate-switcher-unread-column')).toHaveAttribute('data-count', '2')
     expect(pills().map((p) => p.getAttribute('data-member'))).toEqual(['oncall', 'fixer'])
     // The pill IS the unread signal, so its name says who and why.
     expect(pills()[0]).toHaveAccessibleName('oncall, Unread message')
@@ -309,33 +325,40 @@ describe('CrewmateSwitcher unread column', () => {
     expect(screen.queryByTestId('crewmate-switcher-unread-more')).toBeNull()
   })
 
-  it('draws no column when nothing is unread, nor for the OPEN crewmate alone', () => {
-    const { unmount } = render(<CrewmateSwitcher members={MEMBERS} activeName="scribe" onPick={vi.fn()} />)
-    expect(screen.queryByTestId('crewmate-switcher-unread-column')).toBeNull()
+  it('draws nothing when nothing is unread, nor for the OPEN crewmate alone', () => {
+    const { unmount } = column()
+    expect(pills()).toHaveLength(0)
+    expect(screen.getByTestId('crewmate-switcher-unread-column')).toHaveAttribute('data-count', '0')
     unmount()
     // The open crewmate's thread is on screen: its unread is being read.
-    render(<CrewmateSwitcher members={MEMBERS} activeName="scribe" onPick={vi.fn()} signals={signalsBy({ scribe: { unread: true } })} />)
-    expect(screen.queryByTestId('crewmate-switcher-unread-column')).toBeNull()
+    column({ signals: signalsBy({ scribe: { unread: true } }) })
+    expect(pills()).toHaveLength(0)
   })
 
   it('a hidden row (the column\'s hide rule) gets no pill even when unread', () => {
     const hidden = row('ghostwriter', { has_dm_message: false, dashboard_created: false } as Partial<MemberRosterRow>)
-    setup({ members: [...MEMBERS, hidden], signals: signalsBy({ ghostwriter: { unread: true } }) })
-    expect(screen.queryByTestId('crewmate-switcher-unread-column')).toBeNull()
+    column({ members: [...MEMBERS, hidden], signals: signalsBy({ ghostwriter: { unread: true } }) })
+    expect(pills()).toHaveLength(0)
   })
 
-  it('past four pills the rest fold into one "+N" pill that opens the list', async () => {
+  it('past four pills the rest fold into one "+N" pill that asks for the list', () => {
     const many = ['a', 'b', 'c', 'd', 'e', 'f'].map((n) => row(n))
     const unread = Object.fromEntries(many.map((m) => [m.name, { unread: true }]))
-    setup({ members: [MEMBERS[1], ...many], signals: signalsBy(unread) })
+    const { onMore } = column({ members: [MEMBERS[1], ...many], signals: signalsBy(unread) })
     expect(pills().map((p) => p.getAttribute('data-member'))).toEqual(['a', 'b', 'c', 'd'])
     const more = screen.getByTestId('crewmate-switcher-unread-more')
     expect(more).toHaveTextContent('+2 more')
-    expect(more).toHaveAttribute('aria-expanded', 'false')
     fireEvent.click(more)
-    const list = await screen.findByTestId('crewmate-switcher-list')
-    // The list's rows carry the same unread dot, so the fold loses nothing.
-    expect(within(list).getAllByTestId('crewmate-switcher-unread-dot')).toHaveLength(6)
-    await waitFor(() => expect(screen.getByTestId('crewmate-switcher-unread-more')).toHaveAttribute('aria-expanded', 'true'))
+    expect(onMore).toHaveBeenCalledTimes(1)
+  })
+
+  it('each pill sits in its own animated row, so it grows in and shrinks out', () => {
+    column({ signals: signalsBy({ fixer: { unread: true } }) })
+    const rows = screen.getAllByTestId('crewmate-switcher-unread-row')
+    expect(rows).toHaveLength(1)
+    // The row clips its content while its height animates; the gap above the
+    // pill rides inside the row so it animates with it.
+    expect(rows[0].className).toContain('overflow-hidden')
+    expect(pills()[0].className).toContain('mt-1.5')
   })
 })

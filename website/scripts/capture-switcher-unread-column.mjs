@@ -10,8 +10,13 @@
  *
  * Runs the REAL built SPA behind `serveDist` with every `/api/**` answered from
  * fixtures (`stubDashboardApi`): no gateway, no auth, no kiro-cli. Unread is
- * seeded the way the websocket marker leaves it (`mc-unread-slots`). Every
- * frame asserts what it photographs before writing the PNG.
+ * seeded the way the websocket marker leaves it (`mc-unread-slots`), and the
+ * `arrives` scene pushes a crewmate's reply over the stubbed websocket so the
+ * pill is photographed GROWING in, frame by frame (the GIF is built from
+ * those). The `narrow` scene is the thread at a width just above `md`, with a
+ * conversation under the header, to show the pills push the first rows down
+ * rather than sit on their text. Every frame asserts what it photographs
+ * before writing the PNG.
  */
 import { chromium } from 'playwright'
 import { mkdirSync } from 'node:fs'
@@ -73,8 +78,20 @@ const extra = async (path, route) => {
   if (/^\/api\/members\/[^/]+\/activity$/.test(path)) { await json(route, { slug: '', member: '', capped: false, entries: [] }); return true }
   if (/^\/api\/members\/[^/]+\/briefing$/.test(path)) { await json(route, { slug: '', member: '', supported: true, text: '', updated_ts: now, redacted: false, truncated: false }); return true }
   if (/^\/api\/members\/[^/]+\/panel$/.test(path)) { await json(route, { panel: null, html: null }); return true }
+  if (/^\/api\/chat\/slots\/member-[^/]+$/.test(path)) { await json(route, SLOT_DETAIL); return true }
   return false
 }
+
+/** The open thread's conversation, so the frames show what sits under the
+ *  header band. */
+const ts = (i) => new Date(Date.UTC(2026, 9, 10, 5, 0, 0) + i * 60_000).toISOString()
+const MESSAGES = [
+  { role: 'user', content: 'Take the folder-indent bug, the sidebar one.', cls: '', ts: ts(0) },
+  { role: 'assistant', content: 'Taken. Reading ChatSidebar first; the indent is lost on restore, not on drag.', cls: '', ts: ts(1) },
+  { role: 'user', content: 'Any ETA?', cls: '', ts: ts(2) },
+  { role: 'assistant', content: 'A first fix within the hour. I will post the PR link here.', cls: '', ts: ts(3) },
+]
+const SLOT_DETAIL = { messages: MESSAGES, running: false, has_more: false, total: MESSAGES.length }
 
 const { srv, base } = await serveDist(DIST)
 const browser = await chromium.launch()
@@ -88,8 +105,8 @@ function check(name, ok, detail = '') {
 const CLIP = { x: 0, y: 0, width: 1100, height: 260 }
 
 /** One scene: `unread` names the crewmates whose slots are unread. */
-async function scene(tag, theme, unread, { frames = false } = {}) {
-  const context = await browser.newContext({ viewport: { width: 1500, height: 940 }, deviceScaleFactor: 2, colorScheme: theme })
+async function scene(tag, theme, unread, { frames = false, width = 1500 } = {}) {
+  const context = await browser.newContext({ viewport: { width, height: 940 }, deviceScaleFactor: 2, colorScheme: theme })
   const page = await context.newPage()
   logPageProblems(page)
   await stubDashboardApi(page, {
@@ -123,7 +140,25 @@ async function scene(tag, theme, unread, { frames = false } = {}) {
   const rest = unread.filter((n) => n !== OPEN_MEMBER).length - expectPills
   check(`[${tag}/${theme}] "+N" pill ${rest > 0 ? `says +${rest} more` : 'absent'}`,
     rest > 0 ? (await more.innerText()).trim() === `+${rest} more` : (await more.count()) === 0)
-  await page.screenshot({ path: join(OUT, `${tag}-${theme}-rest.png`), clip: CLIP })
+  if (expectPills > 0) {
+    // The header's measured height is the thread's top inset: the first row
+    // of the conversation starts BELOW the last pill, never under it.
+    const lastPill = await page.getByTestId('crewmate-switcher-unread-row').last().boundingBox()
+    const header = await page.getByTestId('member-thread-header').boundingBox()
+    const firstMsg = page.getByText(MESSAGES[0].content, { exact: true }).first()
+    const firstRow = (await firstMsg.count()) > 0 ? await firstMsg.boundingBox() : null
+    check(`[${tag}/${theme}] header grows to hold the column`, header.y + header.height >= lastPill.y + lastPill.height - 1,
+      `header bottom=${Math.round(header.y + header.height)} last pill bottom=${Math.round(lastPill.y + lastPill.height)}`)
+    if (firstRow) {
+      check(`[${tag}/${theme}] first message starts under the last pill`, firstRow.y >= lastPill.y + lastPill.height - 1,
+        `first row y=${Math.round(firstRow.y)} last pill bottom=${Math.round(lastPill.y + lastPill.height)}`)
+    }
+    // Nothing of the column reaches under the identity pill's words.
+    const pillBox = await pill.boundingBox()
+    check(`[${tag}/${theme}] column clears the identity pill`, lastPill.y >= pillBox.y + pillBox.height - 1 || lastPill.x + lastPill.width <= pillBox.x,
+      `column top=${Math.round(lastPill.y)} pill bottom=${Math.round(pillBox.y + pillBox.height)}`)
+  }
+  await page.screenshot({ path: join(OUT, `${tag}-${theme}-rest.png`), clip: { ...CLIP, width: Math.min(CLIP.width, width) } })
 
   // Hover the chip: the roster word slides in.
   const chip = page.getByTestId('crewmate-switcher')
@@ -142,7 +177,7 @@ async function scene(tag, theme, unread, { frames = false } = {}) {
   await page.waitForTimeout(400)
   const openW = (await page.getByTestId('crewmate-switcher-label').boundingBox())?.width ?? 0
   check(`[${tag}/${theme}] roster word open under hover`, openW > 40, `width=${openW}`)
-  await page.screenshot({ path: join(OUT, `${tag}-${theme}-hover-chip.png`), clip: CLIP })
+  await page.screenshot({ path: join(OUT, `${tag}-${theme}-hover-chip.png`), clip: { ...CLIP, width: Math.min(CLIP.width, width) } })
 
   if (expectPills > 0) {
     // A pill names who and why, and opens that thread.
@@ -173,11 +208,61 @@ async function scene(tag, theme, unread, { frames = false } = {}) {
   await context.close()
 }
 
+/** A crewmate's reply lands while another thread is open: the pill grows in.
+ *  Frames every ~60ms through the 220ms grow, then the settled state. */
+async function arrives(theme) {
+  const context = await browser.newContext({ viewport: { width: 1500, height: 940 }, deviceScaleFactor: 2, colorScheme: theme })
+  const page = await context.newPage()
+  logPageProblems(page)
+  await stubDashboardApi(page, {
+    theme, extra, slots: SLOTS,
+    localStorageEntries: {
+      'mc-lang': 'en', 'mc-crewmates-onboarded': '1', 'mc-crewmates-page-entered': '1', 'mc-nav': '1',
+      'mc-members-panel-open': '0',
+      'mc-unread-slots': JSON.stringify(['member-oncall']),
+    },
+  })
+  // AFTER the shared stub so this wins: the stub swallows /api/ws to stop a
+  // retry storm, but this scene needs the socket to push the reply frame.
+  let wsServer = null
+  await page.routeWebSocket(/\/api\/ws/, (ws) => { wsServer = ws })
+  await page.goto(`${base}/members?member=${encodeURIComponent(OPEN_MEMBER)}`, { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('member-identity-pill').waitFor({ state: 'visible', timeout: 30000 })
+  await page.waitForTimeout(900)
+  await page.mouse.move(5, 600)
+  for (let i = 0; i < 40 && !wsServer; i++) await page.waitForTimeout(100)
+  check(`[arrives/${theme}] the page opened its websocket`, !!wsServer)
+  const pills = page.getByTestId('crewmate-switcher-unread-pill')
+  check(`[arrives/${theme}] one pill before the reply`, (await pills.count()) === 1)
+  const clip = { x: 0, y: 0, width: 760, height: 220 }
+  await page.screenshot({ path: join(OUT, `arrive-${theme}-0.png`), clip })
+  // What `slot.append` broadcasts when Build Watcher answers in its own thread.
+  wsServer.send(JSON.stringify({ type: 'chat_message', data: {
+    slot: 'member-build-watcher', role: 'assistant', content: 'CI on the release branch is green.', cls: 'msg msg-a',
+    ts: new Date().toISOString(), meta: { mid: 'arrive-1' },
+  } }))
+  for (let i = 1; i <= 5; i++) {
+    await page.waitForTimeout(55)
+    await page.screenshot({ path: join(OUT, `arrive-${theme}-${i}.png`), clip })
+  }
+  await page.waitForTimeout(400)
+  await page.screenshot({ path: join(OUT, `arrive-${theme}-6.png`), clip })
+  check(`[arrives/${theme}] two pills after the reply, new one in roster order`, (await pills.count()) === 2 && (await pills.first().getAttribute('data-member')) === 'build-watcher')
+  // The row grew: its final height is the pill plus the gap above it.
+  const rowH = (await page.getByTestId('crewmate-switcher-unread-row').first().boundingBox()).height
+  check(`[arrives/${theme}] the new row settled at full height`, rowH >= 38, `height=${rowH}`)
+  await context.close()
+}
+
 for (const theme of ['light', 'dark']) {
   await scene('none', theme, [])
   await scene('two', theme, ['build-watcher', 'oncall'], { frames: theme === 'light' })
   await scene('six', theme, ['build-watcher', 'researcher', 'oncall', 'pipeline', 'scribe', 'radar'])
+  await arrives(theme)
 }
+// A pane just above `md`: the thread alone, the identity pill centred, the
+// column under the chip pushing the conversation down.
+await scene('narrow', 'light', ['build-watcher', 'oncall', 'researcher'], { width: 820 })
 
 console.log(`\nshots in ${OUT}`)
 await browser.close()

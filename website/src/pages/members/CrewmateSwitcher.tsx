@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { Check, ChevronDown, PanelLeft, Plus, Search } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { MemberRosterRow } from '../../api/client'
@@ -41,14 +42,11 @@ const rowOnlySignals = (m: MemberRosterRow): MemberSignals => ({
  * always the chip's accessible name); open, it is a searchable list of every
  * crewmate, the current one marked, and a "New crewmate" footer that opens the same create dialog the
  * old column's "+" did (one write path, one more front door). A second footer
- * Under the chip, one small pill per crewmate with an UNREAD message who is
- * not the open one (issue #19045): face with the unread dot, then the display
- * name. A pill opens that thread the way a list row does; the page clears the
- * unread, and the pill goes. Past `UNREAD_PILLS` the rest fold into one "+N"
- * pill that opens the list, whose rows carry the same unread dot. No unread, no
- * column. The word "Crewmates" and the roster count the chip used to carry
- * said what the page is and how big the crew is — neither is what a reader
- * comes to this corner for, which is "who said something I have not read".
+ * Under the chip the page draws `CrewmateUnreadColumn` (below): one small pill
+ * per crewmate with an UNREAD message who is not the open one (issue #19045).
+ * The word "Crewmates" and the roster count the chip used to carry said what
+ * the page is and how big the crew is — neither is what a reader comes to this
+ * corner for, which is "who said something I have not read".
  *
  * action, "Show the full roster", brings the roster column back beside the
  * thread: this list holds crewmates only, and the column is where the team
@@ -86,6 +84,7 @@ export default function CrewmateSwitcher({
   onCreate,
   onShowRoster,
   signals = rowOnlySignals,
+  openRequest = 0,
   className,
 }: {
   /** The FULL roster, in the page's display order. The hide rule below decides
@@ -110,11 +109,20 @@ export default function CrewmateSwitcher({
    *  read, so the dot here can never disagree with the filter that counts it.
    *  Omitted, a row shows only its own `running`. */
   signals?: (m: MemberRosterRow) => MemberSignals
+  /** Bumped by the page to open the list from outside (the unread column's
+   *  "+N" pill). A counter, not a boolean, so two requests in a row both open. */
+  openRequest?: number
   className?: string
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  // An outside request opens the list; the first render's 0 is not a request.
+  const seenRequest = useRef(openRequest)
+  if (openRequest !== seenRequest.current) {
+    seenRequest.current = openRequest
+    if (!open) setOpen(true)
+  }
   // Set by the footer's roster action: the page moves focus into the column it
   // opens, so the popover must not hand focus back to this (now hidden) chip.
   const toRosterRef = useRef(false)
@@ -132,20 +140,11 @@ export default function CrewmateSwitcher({
     () => population.some((m) => m.name !== activeName && signals(m).needsYou),
     [population, activeName, signals],
   )
-  // Crewmates other than the open one with a message the user has not seen,
-  // in roster order: each gets a pill under the chip.
-  const unreadRows = useMemo(
-    () => population.filter((m) => m.name !== activeName && signals(m).unread),
-    [population, activeName, signals],
-  )
-  const unreadPills = unreadRows.slice(0, UNREAD_PILLS)
-  const unreadRest = unreadRows.length - unreadPills.length
   // The chip's accessible name is the page's own word, then the signal when
   // there is one; the action stays in the tooltip. The word also slides into
   // view on hover or focus, so a reader who wonders what the faces are gets
   // the answer without opening the list.
   const rosterLabel = t('pages.membersPage.title')
-  const unreadLabel = t('pages.membersPage.unread_message')
   const needsYouLabel = t('pages.membersPage.filter_status_needs_you')
   // Joined by the locale's list formatter, not a literal separator (i18n-catalog).
   const chipLabel = othersNeedYou ? fmtList([rosterLabel, needsYouLabel], { type: 'unit' }) : rosterLabel
@@ -167,7 +166,6 @@ export default function CrewmateSwitcher({
   }, [population, activeName])
 
   return (
-    <div className={cn('relative flex', className)}>
     <Popover
       guideScope="menu:members.switcher"
       open={open}
@@ -187,7 +185,10 @@ export default function CrewmateSwitcher({
           type="button"
           variant="chip"
           radius={999}
-          className="group glass-hover flex items-center gap-1.5 h-[42px] pl-2.5 pr-2.5 rounded-full text-text data-[state=open]:[--glass-tint:color-mix(in_srgb,var(--text)_8%,var(--glass-tint-step))] transition-colors cursor-pointer focus-ring shrink-0"
+          className={cn(
+            'group glass-hover flex items-center gap-1.5 h-[42px] pl-2.5 pr-2.5 rounded-full text-text data-[state=open]:[--glass-tint:color-mix(in_srgb,var(--text)_8%,var(--glass-tint-step))] transition-colors cursor-pointer focus-ring shrink-0',
+            className,
+          )}
           aria-label={chipLabel}
           // A static key: the generator reads the registered label off this attribute.
           title={t('pages.membersPage.switch_crewmate')}
@@ -384,67 +385,123 @@ export default function CrewmateSwitcher({
         )}
       </PopoverContent>
     </Popover>
-    {/* The unread column: who said something you have not read, one pill
-        each, hanging under the chip in the header's floating band. Absolute,
-        so the header's measured height (the thread's top inset) stays the
-        chip's own: the pills float over the first rows the way the chip does,
-        and go as soon as the thread is read. Same Glass as the chip, smaller,
-        so the column reads as the chip's own list and not a second toolbar. */}
-    {unreadRows.length > 0 && (
-      <div
-        className="absolute left-0 top-full mt-2 flex flex-col items-start gap-1.5"
-        data-testid="crewmate-switcher-unread-column"
-      >
-        {unreadPills.map((m) => {
+  )
+}
+
+/** How a pill enters and leaves: it grows out of the row above (height, so the
+ *  pills below and the thread's top inset move with it) while fading in; leaving
+ *  runs the same in reverse. The thread header is measured by a ResizeObserver,
+ *  so the conversation's padding follows the animation frame by frame rather
+ *  than jumping to the final height. */
+const PILL_SPRING = { duration: 0.22, ease: [0.2, 0.8, 0.2, 1] as const }
+
+/**
+ * The unread column under the switcher chip (issue #19045): one small pill per
+ * crewmate with an unread message who is not the open one, in roster order --
+ * the face with the unread dot on its corner, then the display name. A pill
+ * opens that thread the way a list row does; the page clears the unread, and
+ * the pill leaves. Past `UNREAD_PILLS` the rest fold into one "+N" pill that
+ * hands the page `onMore` (it opens the switcher list, whose rows carry the
+ * same dot). Nothing unread, nothing drawn.
+ *
+ * It is a separate component, not a child of the chip, because the page lays
+ * it in the thread header's own grid as a second row: the header's measured
+ * height is the thread's top inset, so pills push the first rows down instead
+ * of floating over them, and a narrow pane never has a pill under the identity
+ * pill's words. The same `rosterPopulation` rule as the chip decides who can
+ * have a pill, so a row the chip does not list never gets one.
+ */
+export function CrewmateUnreadColumn({
+  members,
+  defaultAgent,
+  activeName,
+  onPick,
+  onMore,
+  signals = rowOnlySignals,
+  className,
+}: {
+  members: MemberRosterRow[]
+  defaultAgent: string | null
+  activeName: string
+  onPick: (name: string) => void
+  /** Opens the switcher's list; the "+N" pill's action. */
+  onMore: () => void
+  signals?: (m: MemberRosterRow) => MemberSignals
+  className?: string
+}) {
+  const { t } = useTranslation()
+  const reduced = useReducedMotion()
+  const population = useMemo(
+    () => rosterPopulation(members, { search: '', defaultAgent, chosen: activeName }),
+    [members, defaultAgent, activeName],
+  )
+  const unreadRows = useMemo(
+    () => population.filter((m) => m.name !== activeName && signals(m).unread),
+    [population, activeName, signals],
+  )
+  const pills = unreadRows.slice(0, UNREAD_PILLS)
+  const rest = unreadRows.length - pills.length
+  const unreadLabel = t('pages.membersPage.unread_message')
+  // Height + opacity, from the row above; reduced motion cuts to the end state.
+  const grow = reduced
+    ? { initial: false as const, animate: { height: 'auto', opacity: 1 }, exit: { height: 0, opacity: 0, transition: { duration: 0 } }, transition: { duration: 0 } }
+    : { initial: { height: 0, opacity: 0, y: -6 }, animate: { height: 'auto', opacity: 1, y: 0 }, exit: { height: 0, opacity: 0, y: -6 }, transition: PILL_SPRING }
+
+  return (
+    <div className={cn('flex flex-col items-start', className)} data-testid="crewmate-switcher-unread-column" data-count={unreadRows.length}>
+      <AnimatePresence initial={false}>
+        {pills.map((m) => {
           const label = crewDisplayName(m)
           return (
+            <motion.div key={m.name} {...grow} className="overflow-hidden flex" data-testid="crewmate-switcher-unread-row">
+              <Glass
+                as="button"
+                type="button"
+                variant="chip"
+                radius={999}
+                // The gap between pills (and above the first) rides INSIDE the
+                // animated box as a top margin, so it grows and shrinks with it.
+                className="glass-hover mt-1.5 flex items-center gap-1.5 h-[34px] pl-1.5 pr-2.5 max-w-[240px] rounded-full text-text transition-colors cursor-pointer focus-ring pointer-events-auto"
+                // Name, then state: the pill IS the unread signal, so the dot's
+                // meaning rides in the button's name rather than a second image.
+                aria-label={fmtList([label, unreadLabel], { type: 'unit' })}
+                // A static key: the generator reads the registered label off this attribute.
+                title={t('pages.membersPage.unread_message')}
+                onClick={() => onPick(m.name)}
+                data-testid="crewmate-switcher-unread-pill"
+                data-member={m.name}
+                {...uiLocation('members.switcher.unread')}
+              >
+                <span className="relative flex shrink-0" aria-hidden="true">
+                  <CrewStateAvatar seed={m.name} avatar={m.avatar} slotKey={m.slot_key} running={signals(m).running} size={22} working="subtle" />
+                  {/* The roster row's unread dot, on the face's corner: accent,
+                      never the green of the working presence dot. */}
+                  <span className="absolute -right-0.5 -bottom-0.5 w-2.5 h-2.5 rounded-full border-2 border-bg bg-accent" />
+                </span>
+                <span className="text-[12.5px] font-medium truncate" aria-hidden="true">{label}</span>
+              </Glass>
+            </motion.div>
+          )
+        })}
+        {rest > 0 && (
+          <motion.div key="more" {...grow} className="overflow-hidden flex" data-testid="crewmate-switcher-unread-row">
             <Glass
-              key={m.name}
               as="button"
               type="button"
               variant="chip"
               radius={999}
-              className="glass-hover flex items-center gap-1.5 h-[34px] pl-1.5 pr-2.5 max-w-[240px] rounded-full text-text transition-colors cursor-pointer focus-ring"
-              // Name, then state: the pill IS the unread signal, so the dot's
-              // meaning rides in the button's name rather than a second image.
-              aria-label={fmtList([label, unreadLabel], { type: 'unit' })}
+              className="glass-hover mt-1.5 flex items-center h-[34px] px-3 rounded-full text-[12.5px] font-medium text-muted transition-colors cursor-pointer focus-ring pointer-events-auto"
+              onClick={onMore}
               // A static key: the generator reads the registered label off this attribute.
-              title={t('pages.membersPage.unread_message')}
-              onClick={() => onPick(m.name)}
-              data-testid="crewmate-switcher-unread-pill"
-              data-member={m.name}
-              {...uiLocation('members.switcher.unread')}
+              title={t('pages.membersPage.switch_crewmate')}
+              data-testid="crewmate-switcher-unread-more"
+              {...uiLocation('members.switcher.unread-more')}
             >
-              <span className="relative flex shrink-0" aria-hidden="true">
-                <CrewStateAvatar seed={m.name} avatar={m.avatar} slotKey={m.slot_key} running={signals(m).running} size={22} working="subtle" />
-                {/* The roster row's unread dot, on the face's corner: accent,
-                    never the green of the working presence dot. */}
-                <span className="absolute -right-0.5 -bottom-0.5 w-2.5 h-2.5 rounded-full border-2 border-bg bg-accent" />
-              </span>
-              <span className="text-[12.5px] font-medium truncate" aria-hidden="true">{label}</span>
+              {t('pages.membersPage.switcher_more_unread', { n: rest })}
             </Glass>
-          )
-        })}
-        {unreadRest > 0 && (
-          <Glass
-            as="button"
-            type="button"
-            variant="chip"
-            radius={999}
-            className="glass-hover flex items-center h-[34px] px-3 rounded-full text-[12.5px] font-medium text-muted transition-colors cursor-pointer focus-ring"
-            onClick={() => setOpen(true)}
-            // A static key: the generator reads the registered label off this attribute.
-            title={t('pages.membersPage.switch_crewmate')}
-            aria-haspopup="dialog"
-            aria-expanded={open}
-            data-testid="crewmate-switcher-unread-more"
-            {...uiLocation('members.switcher.unread-more')}
-          >
-            {t('pages.membersPage.switcher_more_unread', { n: unreadRest })}
-          </Glass>
+          </motion.div>
         )}
-      </div>
-    )}
+      </AnimatePresence>
     </div>
   )
 }

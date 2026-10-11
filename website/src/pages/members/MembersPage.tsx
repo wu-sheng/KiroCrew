@@ -130,7 +130,7 @@ import { useMateGreeting } from './mateGreeting'
 import type { ThreadHooks } from '../../app-sdk/messageRenderers'
 import { threadsApi, threadsQueryKey } from '../../api/threads'
 import ThreadPanel from './ThreadPanel'
-import CrewmateSwitcher from './CrewmateSwitcher'
+import CrewmateSwitcher, { CrewmateUnreadColumn } from './CrewmateSwitcher'
 import CrewProfilePanel, { PROFILE_FACE_PX, type ProfileTab } from './CrewProfilePanel'
 import CrewComposer from './CrewComposer'
 import { createPortal } from 'react-dom'
@@ -2854,6 +2854,9 @@ export default function MembersPage() {
   // pane's rows pad below the header) or something else is (a card between:
   // the card pads, the pane starts below the card).
   const [threadHeaderRef, threadHeaderH] = useMeasuredHeight<HTMLElement>()
+  // Bumped by the unread column's "+N" pill; the switcher opens its list on
+  // each change (a counter, so two presses in a row both open).
+  const [switcherOpenRequest, setSwitcherOpenRequest] = useState(0)
   const [betweenHeaderRef, betweenHeaderH] = useMeasuredHeight<HTMLDivElement>()
   const pillStreamState = useAppSelector((s) => (pillSlotKey ? selectSlotStreamState(s, pillSlotKey) : 'idle'))
   const pillLiveSlot = useAppSelector((s) => (pillSlotKey ? s.dashboard.slots.find((sl) => sl.key === pillSlotKey) : undefined))
@@ -4258,7 +4261,7 @@ export default function MembersPage() {
                 (narrow) or the panel opener (docked, panel hidden) is present:
                 a flex row with `flex-1` around the pill would shift it by the
                 width of whichever side control is missing. */}
-            <header ref={threadHeaderRef} className="absolute top-0 inset-x-0 z-20 grid grid-cols-[1fr_minmax(0,auto)_1fr] items-center gap-2 px-3 py-2 pointer-events-none" data-testid="member-thread-header">
+            <header ref={threadHeaderRef} className="absolute top-0 inset-x-0 z-20 grid grid-cols-[1fr_minmax(0,auto)_1fr] items-center gap-x-2 px-3 py-2 pointer-events-none" data-testid="member-thread-header">
               {/* Fade behind the three controls: rows scrolling up into the
                   band dissolve toward the page colour before they reach the
                   chips, instead of printing through them; the chips sit on a
@@ -4296,6 +4299,7 @@ export default function MembersPage() {
                   }}
                   onCreate={createHeld ? undefined : () => openGuided()}
                   onShowRoster={() => setRosterPin(true)}
+                  openRequest={switcherOpenRequest}
                 />
                 </div>
                 <Glass
@@ -4352,7 +4356,7 @@ export default function MembersPage() {
                 // press closes it (through the draft guard — see requestCloseProfile)
                 // instead of re-opening on the default tab, which remounted the card.
                 onClick={() => { if (profile) requestCloseProfile(); else openProfile() }}
-                className="glass-shadow flex items-center gap-2.5 pl-2.5 pr-3 py-1.5 min-w-0 max-w-full justify-self-center cursor-pointer text-left focus-ring pointer-events-auto"
+                className="glass-shadow flex items-center gap-2.5 pl-3.5 pr-3.5 py-1.5 min-w-0 max-w-full justify-self-center cursor-pointer text-left focus-ring pointer-events-auto"
                 title={t('pages.membersPage.profile_card')}
                 aria-expanded={!!profile}
                 data-testid="member-identity-pill"
@@ -4453,6 +4457,28 @@ export default function MembersPage() {
                     <PanelRightSolid size={15} />
                   </Glass>
                 )}
+              </div>
+              {/* Row 2 of the header: the unread column (issue #19045), under
+                  the switcher chip and in the header's FLOW, so the measured
+                  height the thread pads for grows with it -- the pills push the
+                  first rows down rather than float over their text. Same slot
+                  rule as the chip: desktop only, and gone (with the chip) while
+                  the roster column is pinned, which carries the same dots. */}
+              <div
+                className={`col-span-3 justify-self-start hidden md:flex duration-200 motion-reduce:transition-none ${rosterPinned ? 'opacity-0 invisible transition-[opacity,visibility]' : 'opacity-100 visible transition-opacity'}`}
+                data-testid="crewmate-unread-column-slot"
+              >
+                <CrewmateUnreadColumn
+                  members={orderedMembers}
+                  defaultAgent={defaultAgent}
+                  activeName={active.name}
+                  signals={signalsOf}
+                  onPick={(name) => {
+                    const m = orderedMembers.find((row) => row.name === name)
+                    if (m) void openMember(m)
+                  }}
+                  onMore={() => setSwitcherOpenRequest((n) => n + 1)}
+                />
               </div>
             </header>
             {/* Everything that can sit between the header and the pane —

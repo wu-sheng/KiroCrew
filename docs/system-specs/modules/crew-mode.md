@@ -1321,12 +1321,22 @@ Unread message") and the tooltip is `unread_message`. A pill opens that thread
 through the same `onPick` as a list row, the page clears the unread, and the
 pill goes. Past `UNREAD_PILLS` (4) the rest fold into one "+N" pill
 (`switcher_more_unread`, `crewmate-switcher-unread-more`) that opens the list,
-whose rows carry the same dot, so nothing is lost to the cap. No unread, no
-column. The column is absolutely positioned under the chip, so the header's
-measured height (the thread's top inset) stays the chip's own and the pills
-float over the first rows the way the chip does. It lives in the switcher's
-`md:` slot, so a phone — whose Back returns to the full roster with its unread
-dots — never draws it. The chip's own corner dot stays reserved for needs-you.
+whose rows carry the same dot, so nothing is lost to the cap (the "+N" pill
+bumps the page's `openRequest` counter, which the chip reads to open its list).
+No unread, no column. The column (`CrewmateUnreadColumn`, exported beside the
+chip) is the thread header's own SECOND grid row (`col-span-3
+justify-self-start`), in flow: the header's measured height is the thread's
+top inset, so the pills push the first conversation rows down rather than sit
+on their text — at any pane width, since row 2 starts under all three row-1
+controls. Each pill sits in its own `motion.div` row inside an
+`AnimatePresence`: it grows in from the row above (height and opacity, 220 ms)
+and shrinks out the same way when its thread is read; the gap above a pill
+rides inside the animated row, and the header is measured by a ResizeObserver,
+so the conversation's padding follows frame by frame. Reduced motion cuts to
+the end state. The column shares the chip's slot rule: desktop only (a phone's
+Back returns to the full roster with its unread dots) and faded out with the
+chip while the roster column is pinned. The chip's own corner dot stays
+reserved for needs-you.
 
 The thread header (`member-thread-header`: the switcher, the identity pill, the
 panel opener) floats OVER the top of the thread (#18325): an absolute row with no

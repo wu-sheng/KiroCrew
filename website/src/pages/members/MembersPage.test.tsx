@@ -1175,8 +1175,12 @@ describe('MembersPage side panel (Dashboard / Work log / Notes / Schedules) and 
     await screen.findByTestId('member-identity-pill')
     expect(screen.getByTestId('member-roster')).toHaveClass('hidden')
     expect(screen.getByTestId('crewmate-switcher')).toBeInTheDocument()
-    // No count on the chip (issue #19045): the open list says how many.
+    // No count on the chip (issue #19045): the open list says how many. The
+    // unread column is the header's own second row, so the thread pads for it.
     expect(screen.queryByTestId('crewmate-switcher-count')).toBeNull()
+    const header = screen.getByTestId('member-thread-header')
+    expect(header.contains(screen.getByTestId('crewmate-unread-column-slot'))).toBe(true)
+    expect(screen.getByTestId('crewmate-unread-column-slot').className).toContain('col-span-3')
   })
 
   it('the Assistant lands with its docked panel hidden, remembered apart from every other crewmate', async () => {
