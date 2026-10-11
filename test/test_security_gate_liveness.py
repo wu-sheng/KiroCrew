@@ -249,7 +249,16 @@ def _url_payload_command(n: int) -> str:
 #: while ``-R 2222:localhost:22``, ``-R 0`` and ``-R 2222:/run/docker.sock`` fail
 #: closed. ``mksh`` also joins ``_NESTED_SHELL_PROGRAMS`` so its ``-c`` payload is
 #: walked like ``ksh``.
-_PACKAGE_LINE_BUDGET = 28_893
+#:
+#: Raised again, from 28,893, for the xargs replace-mode ``-R`` fix: a pipe-fed
+#: ``xargs -I``/``-i``/``--replace`` run (bundled ``-rI`` and ``--replace``
+#: abbreviations included) substitutes run-time stdin into the verb's args,
+#: which can move the destination and remote-command boundary the operand walk
+#: reads, so the ``-R`` self-forward exemption fails closed for any such run.
+#: The replace-string parser moves to ``shell_normalizer._xargs_replacement_string``
+#: (shared with the here-string rebuild) so ``argv_floor`` stays under the per-file
+#: cap. No pattern moved and no pass changed.
+_PACKAGE_LINE_BUDGET = 28_965
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second

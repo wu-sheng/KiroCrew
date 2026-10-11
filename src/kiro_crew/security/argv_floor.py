@@ -132,6 +132,7 @@ from .shell_normalizer import (
     _substitution_depth_delta,
     _text_defeats_argv_position,
     _xargs_here_string_rebuild,
+    _xargs_replacement_string,
 )
 from .vocabulary import _KILL_BY_NAME_PROGRAMS, _SELF_FILE_DELIVERY_VERBS, _SELF_NAME_RE
 
@@ -3217,10 +3218,21 @@ def _is_ssh_to_self(text_lower: str) -> bool:
             # directly-typed one; the rebuild drops the xargs word and the
             # here-string pair, so the recursion walks strictly fewer tokens
             # and terminates.
+            replacement_shifts_argv = False
             if xargs_prefix_index is not None and xargs_prefix_index < i:
                 rebuilt = _xargs_here_string_rebuild(verb, tokens, xargs_prefix_index, i)
                 if rebuilt is not None and _is_ssh_to_self(rebuilt):
                     return True
+                # round-36 (GPT): a pipe-fed xargs replace-mode run (``-I``/
+                # ``-i``/``--replace``) swaps run-time stdin into the verb's args,
+                # which can move the destination and the remote-command boundary
+                # the walk reads (see ``_xargs_replacement_string``).  The walked
+                # positions are then not the ones ssh receives, so the ``-R``
+                # path exemption fails closed exactly as a shell expansion makes
+                # it.  Any replace-mode run arms this (the detached placeholder's
+                # own position is not decidable in the lowered text).
+                if _xargs_replacement_string(tokens, xargs_prefix_index, i) is not None:
+                    replacement_shifts_argv = True
             # rsync execs a pending ``RSYNC_RSH`` / ``RSYNC_CONNECT_PROG``
             # value as its remote shell (or daemon proxy) FROM HERE, so a
             # value that opens a channel to this host is a self dial.
@@ -3238,6 +3250,10 @@ def _is_ssh_to_self(text_lower: str) -> bool:
                     return True
             positional_pending = verb in ("ssh", "sftp")
             remote_command_started = False  # a non-option word has followed the destination
+            # Position is untrustworthy for the ``-R`` exemption when a shell
+            # expansion could rewrite a word (``position_unsafe``) OR when an
+            # xargs ``-I`` placeholder among this verb's args shifts the argv.
+            position_unsafe_here = position_unsafe or replacement_shifts_argv
             destination_literal = False  # the destination slot was taken by a literal word
             option_shadow = False  # previous token was an option that may take a value
             value_shadow = False  # previous token was an option that CONSUMES a value
@@ -3401,7 +3417,7 @@ def _is_ssh_to_self(text_lower: str) -> bool:
                         and (":" in fwd_bare[1:] or fwd_bare[1:].isdigit())
                         and _remote_forward_value_targets_self(
                             fwd_bare[1:],
-                            post_destination=remote_command_started and not position_unsafe,
+                            post_destination=remote_command_started and not position_unsafe_here,
                         )
                     ):
                         return True
@@ -3422,7 +3438,7 @@ def _is_ssh_to_self(text_lower: str) -> bool:
                     # branch table lives on ``_remote_forward_value_targets_self``).
                     if forward_value_letter == "r" and _remote_forward_value_targets_self(
                         _unmask_separators(stripped),
-                        post_destination=remote_command_started and not position_unsafe,
+                        post_destination=remote_command_started and not position_unsafe_here,
                     ):
                         return True
                     forward_value_pending = False

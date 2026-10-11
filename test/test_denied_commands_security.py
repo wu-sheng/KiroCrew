@@ -9176,6 +9176,44 @@ class TestSandboxEscapeSshSelf:
         assert _denied_by("xargs -I{} ssh user@{} <<< far.example.com") is None
         assert _denied_by("xargs ssh <<< remote.example.com") is None
 
+    def test_xargs_replacement_run_cannot_exempt_a_reverse_forward(self):
+        # round-36 (GPT): under an ``-I``/``-i``/``--replace`` run, xargs swaps
+        # stdin words into the verb's args, and a replacement expanding to its
+        # own option absorbs the following word -- so the destination and the
+        # remote-command boundary the walk reads are NOT the ones ssh receives.
+        # In ``xargs -I KEY ssh -N KEY 22 far-host -R tmp/s`` the walk reads
+        # ``KEY`` as the destination and ``22`` as the remote command, which
+        # would exempt the ``/``-bearing ``-R`` value as a remote-command flag;
+        # but xargs runs ``ssh -N <stdin> 22 far-host -R tmp/s`` and when the
+        # stdin word is ``-p`` the real argv is ``ssh -N -p 22 far-host -R
+        # tmp/s`` -- a real reverse forward into this host.  The position-based
+        # ``-R`` exemption must fail closed for a replace-mode run, so the
+        # path-valued ``-R`` after the apparent remote command stays refused.
+        assert (
+            _denied_by("printf '%s\\n' -p | xargs -I KEY ssh -N KEY 22 far-host -R tmp/s")
+            == self._RULE
+        )
+        # The lowered text cannot tell a detached ``-I KEY`` from the
+        # ``{}``-defaulting ``-i``, so any replacement token name arms it.
+        assert _denied_by("printf x | xargs -I Q ssh -N Q 22 far-host -R tmp/s") == self._RULE
+        assert _denied_by("printf x | xargs -I{} ssh -N {} 22 far-host -R run/x") == self._RULE
+        # Bundled valueless flags before the replace letter, and ``--replace``
+        # abbreviations, are the same replace mode and must arm it too.
+        assert _denied_by("printf x | xargs -rI KEY ssh -N KEY 22 far-host -R tmp/s") == self._RULE
+        assert _denied_by("printf x | xargs -0I KEY ssh -N KEY 22 far-host -R tmp/s") == self._RULE
+        assert _denied_by("printf x | xargs -rtI{} ssh -N {} 22 far-host -R run/x") == self._RULE
+        assert (
+            _denied_by("printf x | xargs --rep=KEY ssh -N KEY 22 far-host -R tmp/s") == self._RULE
+        )
+        assert (
+            _denied_by("printf x | xargs --replace=Q ssh -N Q 22 far-host -R tmp/s") == self._RULE
+        )
+        assert _denied_by("printf x | xargs -i ssh -N {} 22 far-host -R tmp/s") == self._RULE
+        # A replace-mode run whose ssh names no reverse forward is still
+        # allowed to a far host: withholding the exemption only refuses a
+        # ``-R`` path value, it does not deny the connection itself.
+        assert _denied_by("echo far-host.example.com | xargs -I{} ssh {} uptime") is None
+
     def test_plain_redirects_still_consume_their_filename(self):
         # The here-string handling must not widen the redirect branch: a
         # detached ``<``/``>`` filename is removed from argv by bash and is

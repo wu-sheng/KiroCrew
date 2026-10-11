@@ -1768,6 +1768,74 @@ def _heredoc_marker(raw: str) -> "str | None":
     return raw[3:] if raw.startswith("<<-") else raw[2:]
 
 
+#: xargs short flags that take NO value, so they may precede the arg-taking
+#: replace letter in a bundle (``-rI STR``, ``-0ISTR``).  Case-folded already.
+_XARGS_VALUELESS_SHORT_FLAGS = frozenset("rtxp0")
+
+
+def _xargs_replacement_string(
+    tokens: "list[str]", xargs_index: int, verb_index: int
+) -> "str | None":
+    """The ``-I``/``-i`` replacement string an xargs invocation declares.
+
+    Scans xargs's own options (those BETWEEN the ``xargs`` word and the verb it
+    launches) for every replace-string spelling and returns the string xargs
+    swaps for stdin words, or ``None`` when the invocation appends stdin
+    instead of replacing a token.  A non-``None`` result means REPLACE mode.
+    Recognized:
+
+    * short ``-I STR`` / ``-ISTR`` and the ``{}``-defaulting ``-i`` / ``-iSTR``;
+    * the SAME replace letter at the end of a valueless-flag bundle
+      (``-rI STR``, ``-0ISTR``, ``-rtiSTR``) -- in a bundle only valueless
+      flags (``r``/``t``/``x``/``p``/``0``) may precede it;
+    * long ``--replace`` / ``--replace=STR`` and any unambiguous abbreviation
+      (``--r`` .. ``--replace``; only ``--replace`` among xargs long options
+      begins with ``r``), its optional argument glued (POSIX) so a detached
+      word is never consumed.
+
+    A non-``None`` result arms the ``-R`` self-forward exemption's
+    position-unsafe path: xargs substitutes run-time stdin for the placeholder
+    wherever it sits, and a replacement expanding to its own option absorbs the
+    following word -- ``xargs -I KEY ssh -N KEY 22 far -R tmp/s`` runs ``ssh -N
+    -p 22 far -R tmp/s`` when stdin is ``-p``, moving the destination and the
+    remote-command boundary the operand walk read.  The exact STRING is only
+    advisory: the floor lowercases its input, so a case-folded ``-I`` is not
+    distinguishable from the ``{}``-defaulting ``-i`` and the placeholder's own
+    position cannot be recovered -- the exemption keys off replace-mode
+    PRESENCE, not off finding the placeholder in the args.
+    """
+    replstr: "str | None" = None
+    k = xargs_index + 1
+    while k < verb_index:
+        opt = tokens[k].strip("\"'")
+        consumed_next = False
+        if opt.startswith("--"):
+            name, sep, val = opt.partition("=")
+            if len(name) > 2 and "replace".startswith(name[2:]):
+                replstr = (val or "{}") if sep else "{}"
+        elif opt.startswith("-") and len(opt) > 1:
+            bundle = opt[1:]
+            pos = bundle.find("i")
+            if pos != -1 and all(c in _XARGS_VALUELESS_SHORT_FLAGS for c in bundle[:pos]):
+                tail = bundle[pos + 1 :]
+                if tail:
+                    replstr = tail
+                elif pos == 0:
+                    # Bare ``-i`` / case-folded ``-I``: default replace string;
+                    # a required ``-I`` argument, if detached, stays the
+                    # advisory residual the lowercase fold cannot resolve.
+                    replstr = "{}"
+                elif k + 1 < verb_index:
+                    # A bundled ``-...I`` is the arg-taking form; its detached
+                    # argument follows.
+                    replstr = tokens[k + 1].strip("\"'")
+                    consumed_next = True
+                else:
+                    replstr = "{}"
+        k += 2 if consumed_next else 1
+    return replstr
+
+
 def _xargs_here_string_rebuild(
     verb: str, tokens: "list[str]", xargs_index: int, verb_index: int
 ) -> "str | None":
@@ -1811,19 +1879,7 @@ def _xargs_here_string_rebuild(
     # xargs's own options decide HOW stdin becomes argv: an ``-I``/``-i``
     # replacement token is swapped in wherever it appears among the verb's
     # args; with none, the stdin words are APPENDED after them.
-    replstr: "str | None" = None
-    for k in range(xargs_index + 1, verb_index):
-        opt = tokens[k].strip("\"'")
-        if opt == "-I" and k + 1 < verb_index:
-            replstr = tokens[k + 1].strip("\"'")
-        elif opt.startswith("-I") and len(opt) > 2:
-            replstr = opt[2:]
-        elif opt in ("-i", "--replace"):
-            replstr = "{}"
-        elif opt.startswith("--replace="):
-            replstr = opt.split("=", 1)[1] or "{}"
-        elif opt.startswith("-i") and not opt.startswith("--") and len(opt) > 2:
-            replstr = opt[2:]
+    replstr = _xargs_replacement_string(tokens, xargs_index, verb_index)
     args: "list[str]" = []
     for j in range(verb_index + 1, len(tokens)):
         if j in consumed:
