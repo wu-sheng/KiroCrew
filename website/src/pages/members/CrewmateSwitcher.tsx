@@ -12,9 +12,14 @@ import { rosterPopulation, rosterShows, type MemberSignals } from './rosterFilte
 import { uiLocation } from '../../uiLocations/uiLocation'
 
 /** How many faces the closed chip stacks. Three is enough to read as "a crew"
- *  without the chip growing with the roster; the count beside them says how many
- *  there really are. */
+ *  without the chip growing with the roster; the open list says how many there
+ *  really are. */
 const STACK_FACES = 3
+
+/** How many unread crewmates get a pill of their own under the chip before the
+ *  rest fold into one "+N" pill. Four pills is a glance; a tower over the
+ *  conversation is not, and past four the open list reads faster anyway. */
+const UNREAD_PILLS = 4
 
 /** The signals a row carries when the page hands none in: presence from the
  *  roster row itself, nothing parked on the user, nothing unread. */
@@ -32,9 +37,19 @@ const rowOnlySignals = (m: MemberRosterRow): MemberSignals => ({
  * That column is gone from the DM view (product decision, crewmate-panel IA):
  * the thread and the crewmate's own panel get the width, and the roster is
  * reached on demand from this chip. Closed, it shows the page's name, the first
- * faces and the crewmate count; open, it is a searchable list of every
+ * faces and a chevron (the roster's name slides in on hover or focus, and is
+ * always the chip's accessible name); open, it is a searchable list of every
  * crewmate, the current one marked, and a "New crewmate" footer that opens the same create dialog the
  * old column's "+" did (one write path, one more front door). A second footer
+ * Under the chip, one small pill per crewmate with an UNREAD message who is
+ * not the open one (issue #19045): face with the unread dot, then the display
+ * name. A pill opens that thread the way a list row does; the page clears the
+ * unread, and the pill goes. Past `UNREAD_PILLS` the rest fold into one "+N"
+ * pill that opens the list, whose rows carry the same unread dot. No unread, no
+ * column. The word "Crewmates" and the roster count the chip used to carry
+ * said what the page is and how big the crew is — neither is what a reader
+ * comes to this corner for, which is "who said something I have not read".
+ *
  * action, "Show the full roster", brings the roster column back beside the
  * thread: this list holds crewmates only, and the column is where the team
  * headers, the star, the filters and the sort live — on desktop,
@@ -117,12 +132,20 @@ export default function CrewmateSwitcher({
     () => population.some((m) => m.name !== activeName && signals(m).needsYou),
     [population, activeName, signals],
   )
-  // The chip carries the page's own name as visible text: a bare /members opens
-  // the last crewmate's thread, so this chip is the roster a first look sees,
-  // and faces plus a number alone did not read as "the crew list". The
-  // accessible name starts with that visible word (label in name), then the
-  // signal when there is one; the action stays in the tooltip.
+  // Crewmates other than the open one with a message the user has not seen,
+  // in roster order: each gets a pill under the chip.
+  const unreadRows = useMemo(
+    () => population.filter((m) => m.name !== activeName && signals(m).unread),
+    [population, activeName, signals],
+  )
+  const unreadPills = unreadRows.slice(0, UNREAD_PILLS)
+  const unreadRest = unreadRows.length - unreadPills.length
+  // The chip's accessible name is the page's own word, then the signal when
+  // there is one; the action stays in the tooltip. The word also slides into
+  // view on hover or focus, so a reader who wonders what the faces are gets
+  // the answer without opening the list.
   const rosterLabel = t('pages.membersPage.title')
+  const unreadLabel = t('pages.membersPage.unread_message')
   const needsYouLabel = t('pages.membersPage.filter_status_needs_you')
   // Joined by the locale's list formatter, not a literal separator (i18n-catalog).
   const chipLabel = othersNeedYou ? fmtList([rosterLabel, needsYouLabel], { type: 'unit' }) : rosterLabel
@@ -144,6 +167,7 @@ export default function CrewmateSwitcher({
   }, [population, activeName])
 
   return (
+    <div className={cn('relative flex', className)}>
     <Popover
       guideScope="menu:members.switcher"
       open={open}
@@ -163,10 +187,7 @@ export default function CrewmateSwitcher({
           type="button"
           variant="chip"
           radius={999}
-          className={cn(
-            'group glass-hover flex items-center gap-1.5 h-[42px] pl-2.5 pr-3 rounded-full text-text data-[state=open]:[--glass-tint:color-mix(in_srgb,var(--text)_8%,var(--glass-tint-step))] transition-colors cursor-pointer focus-ring shrink-0',
-            className,
-          )}
+          className="group glass-hover flex items-center gap-1.5 h-[42px] pl-2.5 pr-2.5 rounded-full text-text data-[state=open]:[--glass-tint:color-mix(in_srgb,var(--text)_8%,var(--glass-tint-step))] transition-colors cursor-pointer focus-ring shrink-0"
           aria-label={chipLabel}
           // A static key: the generator reads the registered label off this attribute.
           title={t('pages.membersPage.switch_crewmate')}
@@ -196,8 +217,20 @@ export default function CrewmateSwitcher({
               />
             )}
           </span>
-          <span className="text-[12.5px] font-semibold" aria-hidden="true" data-testid="crewmate-switcher-label">{rosterLabel}</span>
-          <span className="text-[12.5px] text-muted tabular-nums" aria-hidden="true" data-testid="crewmate-switcher-count">{population.length}</span>
+          {/* The roster's name, folded to a zero-width grid column at rest and
+              slid open on hover, keyboard focus or while the list is open
+              (0fr -> 1fr animates the width; cut under reduced motion). It
+              stays in the DOM folded, but the button is named by `aria-label`
+              above, so the fold changes nothing for a screen reader. */}
+          <span
+            className="grid grid-cols-[0fr] group-hover:grid-cols-[1fr] group-focus-visible:grid-cols-[1fr] group-data-[state=open]:grid-cols-[1fr] transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none"
+            aria-hidden="true"
+            data-testid="crewmate-switcher-label"
+          >
+            <span className="overflow-hidden whitespace-nowrap text-[12.5px] font-semibold">
+              <span className="pl-0.5 pr-1">{rosterLabel}</span>
+            </span>
+          </span>
           <ChevronDown size={13} className={cn('text-muted transition-transform', open && 'rotate-180')} aria-hidden="true" />
         </Glass>
       </PopoverTrigger>
@@ -351,5 +384,67 @@ export default function CrewmateSwitcher({
         )}
       </PopoverContent>
     </Popover>
+    {/* The unread column: who said something you have not read, one pill
+        each, hanging under the chip in the header's floating band. Absolute,
+        so the header's measured height (the thread's top inset) stays the
+        chip's own: the pills float over the first rows the way the chip does,
+        and go as soon as the thread is read. Same Glass as the chip, smaller,
+        so the column reads as the chip's own list and not a second toolbar. */}
+    {unreadRows.length > 0 && (
+      <div
+        className="absolute left-0 top-full mt-2 flex flex-col items-start gap-1.5"
+        data-testid="crewmate-switcher-unread-column"
+      >
+        {unreadPills.map((m) => {
+          const label = crewDisplayName(m)
+          return (
+            <Glass
+              key={m.name}
+              as="button"
+              type="button"
+              variant="chip"
+              radius={999}
+              className="glass-hover flex items-center gap-1.5 h-[34px] pl-1.5 pr-2.5 max-w-[240px] rounded-full text-text transition-colors cursor-pointer focus-ring"
+              // Name, then state: the pill IS the unread signal, so the dot's
+              // meaning rides in the button's name rather than a second image.
+              aria-label={fmtList([label, unreadLabel], { type: 'unit' })}
+              // A static key: the generator reads the registered label off this attribute.
+              title={t('pages.membersPage.unread_message')}
+              onClick={() => onPick(m.name)}
+              data-testid="crewmate-switcher-unread-pill"
+              data-member={m.name}
+              {...uiLocation('members.switcher.unread')}
+            >
+              <span className="relative flex shrink-0" aria-hidden="true">
+                <CrewStateAvatar seed={m.name} avatar={m.avatar} slotKey={m.slot_key} running={signals(m).running} size={22} working="subtle" />
+                {/* The roster row's unread dot, on the face's corner: accent,
+                    never the green of the working presence dot. */}
+                <span className="absolute -right-0.5 -bottom-0.5 w-2.5 h-2.5 rounded-full border-2 border-bg bg-accent" />
+              </span>
+              <span className="text-[12.5px] font-medium truncate" aria-hidden="true">{label}</span>
+            </Glass>
+          )
+        })}
+        {unreadRest > 0 && (
+          <Glass
+            as="button"
+            type="button"
+            variant="chip"
+            radius={999}
+            className="glass-hover flex items-center h-[34px] px-3 rounded-full text-[12.5px] font-medium text-muted transition-colors cursor-pointer focus-ring"
+            onClick={() => setOpen(true)}
+            // A static key: the generator reads the registered label off this attribute.
+            title={t('pages.membersPage.switch_crewmate')}
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            data-testid="crewmate-switcher-unread-more"
+            {...uiLocation('members.switcher.unread-more')}
+          >
+            {t('pages.membersPage.switcher_more_unread', { n: unreadRest })}
+          </Glass>
+        )}
+      </div>
+    )}
+    </div>
   )
 }

@@ -1175,7 +1175,8 @@ describe('MembersPage side panel (Dashboard / Work log / Notes / Schedules) and 
     await screen.findByTestId('member-identity-pill')
     expect(screen.getByTestId('member-roster')).toHaveClass('hidden')
     expect(screen.getByTestId('crewmate-switcher')).toBeInTheDocument()
-    expect(screen.getByTestId('crewmate-switcher-count')).toHaveTextContent('1')
+    // No count on the chip (issue #19045): the open list says how many.
+    expect(screen.queryByTestId('crewmate-switcher-count')).toBeNull()
   })
 
   it('the Assistant lands with its docked panel hidden, remembered apart from every other crewmate', async () => {

@@ -3,7 +3,7 @@
 import type { UiGuidePlan } from './types'
 
 /** The `build_digest` of the packaged index this bundle was built with (see `guideBuildDigest`). */
-export const GUIDE_BUILD_DIGEST = "sha256:98366f31a2aa7737ee5224d799c268c34959e54369a03a8e3c0afc5840c344fc"
+export const GUIDE_BUILD_DIGEST = "sha256:47577e4b928c0263a1bc77f91bbfbecc0f94df29789ef8419adfcfa0a448d050"
 
 /** Curated location ids: the only ids a live observation may name. */
 export const GUIDE_OBSERVABLE_IDS: readonly string[] = [
@@ -87,6 +87,8 @@ export const GUIDE_OBSERVABLE_IDS: readonly string[] = [
   "members.switcher",
   "members.switcher.new",
   "members.switcher.show-roster",
+  "members.switcher.unread",
+  "members.switcher.unread-more",
   "notifications.clear-all",
   "notifications.detail.mark-unread",
   "notifications.mark-all-read",
@@ -2151,6 +2153,52 @@ export const GUIDE_PLANS: Readonly<Record<string, UiGuidePlan>> = {
             "id": "desktop:members.switcher.show-roster",
             "location": "members.switcher.show-roster",
             "label_key": "pages.membersPage.roster_show"
+          }
+        ]
+      }
+    ]
+  },
+  "members.switcher.unread": {
+    "version": 2,
+    "label_key": "pages.membersPage.unread_message",
+    "placements": [
+      {
+        "id": "any",
+        "route": "/members",
+        "steps": [
+          {
+            "id": "any:gate:preview_flag:mc-preview-crew",
+            "kind": "gate",
+            "gate": "preview_flag:mc-preview-crew",
+            "setting_id": "developer.crewmates"
+          },
+          {
+            "id": "any:members.switcher.unread",
+            "location": "members.switcher.unread",
+            "label_key": "pages.membersPage.unread_message"
+          }
+        ]
+      }
+    ]
+  },
+  "members.switcher.unread-more": {
+    "version": 2,
+    "label_key": "pages.membersPage.switch_crewmate",
+    "placements": [
+      {
+        "id": "any",
+        "route": "/members",
+        "steps": [
+          {
+            "id": "any:gate:preview_flag:mc-preview-crew",
+            "kind": "gate",
+            "gate": "preview_flag:mc-preview-crew",
+            "setting_id": "developer.crewmates"
+          },
+          {
+            "id": "any:members.switcher.unread-more",
+            "location": "members.switcher.unread-more",
+            "label_key": "pages.membersPage.switch_crewmate"
           }
         ]
       }
