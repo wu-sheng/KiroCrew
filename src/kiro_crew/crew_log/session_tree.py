@@ -1407,6 +1407,7 @@ class SessionTree:
         """
         out: list[OpenedRecord] = []
         edges: list[EdgeRecord] = []
+        spawn_units: list[tuple[Path, OpenedRecord]] = []
         seen: set[str] = set()
         faulted = False
         with self._lock:
@@ -1455,16 +1456,31 @@ class SessionTree:
                     if edge is not None:
                         edges.append(edge)
                 if spawned_out is not None and record is not None and record.slot:
+                    # Deferred to a second pass below: a creator's spawn is dead weight
+                    # once the child has a parent edge of its own, and which children
+                    # do is known only once every unit in this scan has been read.
+                    spawn_units.append((directory, record))
+            # Children whose OWN log already names a parent -- the fold applies that
+            # over any spawn, so a spawn for such a child neither helps when kept nor
+            # makes the reading any less whole when dropped past the per-unit cap.
+            self_parented = {rec.slot for rec in out if rec.slot and rec.parent_slot}
+            # ``spawn_units`` is populated only when ``spawned_out`` was given, so it is
+            # non-None here whenever there is anything to do.
+            if spawned_out is not None:
+                for directory, record in spawn_units:
                     # The children this unit's session created. Not cached: only the
                     # projection's cold seed asks, once per process, and the
                     # projection keeps the answer from then on.
                     try:
-                        entries, truncated = find_spawned_entries(directory, SPAWNED_PER_UNIT_CAP)
+                        entries, truncated = find_spawned_entries(
+                            directory, SPAWNED_PER_UNIT_CAP, self_parented
+                        )
                     except (OSError, ValueError):
                         entries, truncated = [], True
                     if truncated:
-                        # A fault, or more spawns than the bound: either way this
-                        # unit's children are not all here, so the reading says so.
+                        # A fault, or more LOAD-BEARING spawns than the bound: either
+                        # way this unit's children are not all here, so the reading
+                        # says so.
                         faulted = True
                         if faults is not None:
                             faults.sids.append(record.sid)

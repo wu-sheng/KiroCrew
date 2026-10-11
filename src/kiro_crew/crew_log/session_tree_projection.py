@@ -957,9 +957,17 @@ class SessionTreeProjection:
         with self._lock:
             if not any(spawn.sid == sid for spawn in self._spawned.values()):
                 return
+            # Children whose own log already names a parent: the fold applies that over
+            # any spawn, so dropping such a spawn past the cap costs nothing and must
+            # not report the unit cut. Read under the lock that guards ``_records``.
+            self_parented = {
+                rec.slot for rec in self._records.values() if rec.slot and rec.parent_slot
+            }
         try:
             root = _checked_crew_log_root(KIND_SESSION)
-            entries, truncated = find_spawned_entries(root / _store_name(sid), SPAWNED_PER_UNIT_CAP)
+            entries, truncated = find_spawned_entries(
+                root / _store_name(sid), SPAWNED_PER_UNIT_CAP, self_parented
+            )
         except (OSError, ValueError):
             with self._lock:
                 self._incomplete = True
@@ -1564,6 +1572,10 @@ class SessionTreeProjection:
         spawned = {key: s for key, s in loaded_spawned.items() if s.sid in records}
         scans = {sid: ident for sid, ident in loaded_scans.items() if sid in records}
         incomplete = False
+        # Children whose own log already names a parent: the fold applies that over any
+        # spawn, so a spawn for such a child is dead weight and dropping it past the cap
+        # must not report the creator cut.
+        self_parented = {rec.slot for rec in records.values() if rec.slot and rec.parent_slot}
         try:
             root = _checked_crew_log_root(KIND_SESSION)
         except OSError:
@@ -1584,7 +1596,7 @@ class SessionTreeProjection:
                 continue
             try:
                 entries, truncated = (
-                    find_spawned_entries(directory, SPAWNED_PER_UNIT_CAP)
+                    find_spawned_entries(directory, SPAWNED_PER_UNIT_CAP, self_parented)
                     if identity is not None
                     else ([], False)
                 )

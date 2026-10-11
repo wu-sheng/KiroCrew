@@ -58,7 +58,7 @@ import time
 import traceback
 import weakref
 from collections import deque
-from collections.abc import Callable, Collection, Iterator
+from collections.abc import Callable, Collection, Container, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from functools import partial
@@ -2520,14 +2520,40 @@ _SPAWNED_TYPE = "session/spawned"
 _SPAWNED_NEEDLE = b'"session/spawned"'
 
 
-def find_spawned_entries(directory: Path, limit: int) -> "tuple[list[Entry], bool]":
+def _spawned_child_slot(entry: "Entry") -> "str | None":
+    """The child slot a ``session/spawned`` entry names, or ``None`` when it is shaped
+    wrong. Mirrors the field :func:`session_tree.spawned_record` keys the edge on, so
+    the two agree about which child an entry is about."""
+    child = entry.data.get("child")
+    if not isinstance(child, dict):
+        return None
+    slot = child.get("slot")
+    return slot if isinstance(slot, str) and slot else None
+
+
+def find_spawned_entries(
+    directory: Path, limit: int, self_parented: "Container[str]" = frozenset()
+) -> "tuple[list[Entry], bool]":
     """The NEWEST *limit* ``session/spawned`` entries in *directory*'s surviving log,
-    oldest first, and whether any older ones were left out.
+    oldest first, and whether any older LOAD-BEARING ones were left out.
 
     The whole log, every segment, because a creator records its children over its
     whole life and any of them may still be waiting for a first turn. The newest are
     kept because the newest children are the ones most likely to have no log of their
     own yet. A reader holds what it returns, so the bound is the caller's.
+
+    *self_parented* names child slots the caller already knows have a parent edge of
+    their OWN -- the child opened a log that names a parent, which the fold applies
+    instead of this spawn (:func:`session_tree.fold_tree`: a spawn fills a child's
+    citation "only when none of the child's own records names a parent"). Such a spawn
+    is dead weight: kept, it changes no node; dropped past the cap, it loses nothing.
+    So it is skipped before the cap applies and is NOT counted toward the cut flag.
+    Without this, a long-running creator that recorded more than *limit* children over
+    its life -- all long since started and self-recorded -- would report every scan
+    cut, which the fold's reader turns into "lineage unknown" and uses to refuse the
+    adopt/release authority checks gateway-wide until retention pruned the creator's
+    log, though not one dropped spawn was load-bearing. The default empty set keeps the
+    plain "every spawn counts" behaviour for callers with no record population to hand.
 
     The flag is load-bearing. A cut answer is not the unit's whole answer, so a caller
     must not cache it as complete or report a reading built from it as complete.
@@ -2543,7 +2569,14 @@ def find_spawned_entries(directory: Path, limit: int) -> "tuple[list[Entry], boo
     ]
     found.sort(key=lambda pair: pair[0])
     kept: "deque[Entry]" = deque(maxlen=max(limit, 0))
-    seen = 0
+    # The held set is the newest *limit* spawns of EVERY child, independent of
+    # *self_parented*: it is cached by the creator log's own identity, so it must stay a
+    # pure function of that log. Filtering the held set by the children's logs would let
+    # a later change to a child's log (its deletion, a retracted parent) leave a stale
+    # cache missing a now-needed edge. *self_parented* instead relaxes only the cut flag:
+    # a dropped spawn is counted lost only when its child is NOT self-parented, since the
+    # fold would discard a self-parented child's spawn anyway.
+    dropped_load_bearing = False
     for _first, segment in found:
         if segment.stat().st_size == 0:
             continue
@@ -2557,7 +2590,13 @@ def find_spawned_entries(directory: Path, limit: int) -> "tuple[list[Entry], boo
                         continue
                     entry = Entry.from_dict(parsed)
                     if entry is not None and entry.type == _SPAWNED_TYPE:
-                        seen += 1
+                        # Appending to a full maxlen deque evicts the oldest. That
+                        # evicted spawn is only a lost answer when its child is not
+                        # self-parented -- otherwise the fold ignores it regardless.
+                        if kept.maxlen and len(kept) == kept.maxlen:
+                            evicted = kept[0]
+                            if _spawned_child_slot(evicted) not in self_parented:
+                                dropped_load_bearing = True
                         kept.append(entry)
             except UnreadableRecord as exc:
                 # Same conversion :func:`_scan_whole_for_types` makes, so every caller
@@ -2565,7 +2604,7 @@ def find_spawned_entries(directory: Path, limit: int) -> "tuple[list[Entry], boo
                 raise ValueError(
                     f"crew log segment {segment.name} holds an unreadable record"
                 ) from exc
-    return list(kept), seen > len(kept)
+    return list(kept), dropped_load_bearing
 
 
 def _scan_whole_for_types(segment: Path, types: "frozenset[str]") -> "Entry | None":
