@@ -49,7 +49,7 @@ import logging
 import threading
 from dataclasses import dataclass
 from dataclasses import field as dc_field
-from typing import Any, Callable, Final, Mapping
+from typing import Any, Callable, Final, Iterable, Mapping
 
 from kiro_crew.crew_log import bus as crew_log_bus
 from kiro_crew.crew_log.projection import SESSION_FOLD_NAMES, SLOT_PROJECTION_NAMES
@@ -148,11 +148,13 @@ def scope_for(fold: str) -> str:
       it joins the logs of many slots, so its value is stale when any member's log
       grows and the bus has no key that covers that. Its value belongs to a page load
       and a refetch (:func:`~kiro_crew.crew_log.projection.read_tree_projection`),
-      which the controller's gap rule already covers, and that read ships with the
-      first block that consumes it -- so ``subscribe`` reports a tree binding
-      unavailable until then. Stated here rather than left to fall out of
-      three failed membership tests, because an absence that means "by design" and an
-      absence that means "unknown name" would otherwise look identical.
+      which the controller's gap rule already covers -- so ``subscribe`` reports a tree
+      binding unavailable and
+      :meth:`~kiro_crew.dashboard.handlers.member_dashboard_fields.LivePage._read_trees`
+      supplies the value instead. A CALLER MUST NOT read that report as "this fold is
+      unreachable": it means "not by subscription". Stated here rather than left to
+      fall out of three failed membership tests, because an absence that means "by
+      design" and an absence that means "unknown name" would otherwise look identical.
     """
     if fold in SLOT_PROJECTION_NAMES:
         return crew_log_bus.SCOPE_SLOT
@@ -197,8 +199,15 @@ class DashboardFeed:
 
     # -- subscription ------------------------------------------------------- #
 
-    def subscribe(self, manifest: TemplateManifest) -> list[str]:
+    def subscribe(self, manifest: TemplateManifest, extra_folds: Iterable[str] = ()) -> list[str]:
         """Subscribe to the folds *manifest* names; return the ones that could not be.
+
+        *extra_folds* are folds no field reads a path into but the caller still needs
+        cached. The ``agentic`` fold is the case it exists for: a page's own written
+        values live in it, and reading them off disk per change would put file I/O on
+        the fold worker's thread -- which is the one thread this class may not block.
+        Subscribed through the same baseline, so a value written before the page opened
+        is there on first read.
 
         REPLACES any earlier subscription set, so an instance edited onto a template
         with different sources stops receiving the folds it does not bind. Disposed
@@ -217,7 +226,7 @@ class DashboardFeed:
         """
         self.unsubscribe()
         unavailable: list[str] = []
-        folds = sorted(manifest.folds)
+        folds = sorted(frozenset(manifest.folds) | frozenset(extra_folds))
         for fold in folds:
             scope = scope_for(fold)
             key = self.slot if scope == crew_log_bus.SCOPE_SLOT else self.session_unit
@@ -380,3 +389,17 @@ class DashboardFeed:
     def folds(self) -> frozenset[str]:
         """The folds this feed is subscribed to. For a test and a log line."""
         return self._folds
+
+    def fold_value(self, fold: str) -> Mapping[str, Any]:
+        """One subscribed fold's latest cached value, or an empty mapping.
+
+        The read :meth:`read` cannot do for a caller: it resolves a PATH into a fold,
+        and the ``agentic`` fold is consumed whole -- its ``fields`` member is the table
+        of written values, keyed by field name. Empty for a fold this feed does not hold
+        and for one that has not been seen, which read the same way: no value yet.
+        """
+        with self._lock:
+            cell = self._cells.get(fold)
+            if cell is None or not cell.seen or not isinstance(cell.value, Mapping):
+                return {}
+            return cell.value

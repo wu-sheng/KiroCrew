@@ -11,6 +11,7 @@ import { buildSrcdoc, readThemeVars } from '../../lib/widgetSrcdoc'
 import { i18nT } from '../../i18n/t'
 import { apiErrorCode } from '../../api/apiError'
 import { useLanguage } from '../../i18n/LanguageProvider'
+import { subscribeDashboardFields } from '../../hooks/websocket/dashboardFields'
 
 /**
  * The sandbox grants for a crewmate's dynamic dashboard, and the ONE line of
@@ -50,6 +51,9 @@ const READY_MESSAGE_TYPE = 'kirocrew-dashboard:ready'
  * fills the composer, and the person presses send. That is the whole safety
  * line -- a page that could send would be a page that could speak as the user. */
 const ACT_MESSAGE_TYPE = 'kirocrew-dashboard:act'
+/** What the page posts when it cannot place a patch in order. Mirrors
+ *  `dashboard_frame.REFETCH_MESSAGE_TYPE`. */
+const REFETCH_MESSAGE_TYPE = 'kirocrew-dashboard:refetch'
 /** Longest reply a page may put in the composer. Longer is refused, not cut. */
 const ACT_MAX_CHARS = 600
 
@@ -139,18 +143,67 @@ export default function CrewDynamicDashboard({ slug, member, displayName, onAct,
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const onActRef = useRef(onAct)
   onActRef.current = onAct
-  // The page's options. Only a message from THIS frame's window counts: any other
-  // window posting the same shape is ignored.
+  // The page's options, and its request for a whole read. Only a message from THIS
+  // frame's window counts: any other window posting the same shape is ignored.
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       const win = frameRef.current?.contentWindow
       if (!win || event.source !== win) return
       const text = actText(event.data)
-      if (text && onActRef.current) onActRef.current(text)
+      if (text && onActRef.current) {
+        onActRef.current(text)
+        return
+      }
+      // THE GAP. The page applies patches in sequence and asks for the whole read
+      // when one skips a version; answering with another patch would reach the same
+      // half-updated page one round trip later.
+      const kind = (event.data ?? {}) as { type?: unknown }
+      if (kind.type !== REFETCH_MESSAGE_TYPE) return
+      api.memberDashboardRefetch(slug, member)
+        .then((answer) => {
+          const read = answer?.read
+          if (read && typeof read === 'object') {
+            // '*' is REQUIRED, not a laxity: this frame is sandboxed with
+            // `allow-scripts` and WITHOUT `allow-same-origin`, so its origin is
+            // opaque and no non-wildcard targetOrigin can ever match it. The
+            // message is posted to THIS frame's own contentWindow and carries only
+            // the fields the page's own model declares, already redacted by the
+            // controller -- so the wildcard reaches exactly one window.
+            // nosemgrep: javascript.browser.security.wildcard-postmessage-configuration.wildcard-postmessage-configuration
+            frameRef.current?.contentWindow?.postMessage(
+              { type: DATA_MESSAGE_TYPE, read },
+              '*',
+            )
+          }
+        })
+        .catch(() => {
+          // Nothing armed, or the read failed. The page keeps the values it has and
+          // the fallback interval re-reads the whole dashboard, which arms one --
+          // so a lost refetch costs freshness for one interval, not the page.
+        })
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [])
+  }, [slug, member])
+
+  // THE PUSH. The gateway sends the fields that MOVED; this posts them into the
+  // frame, whose bootstrap merges the patch, refills the bindings and calls back
+  // only the subscribers for the fields the patch carried.
+  //
+  // `postMessage` and not a re-render: the page owns its own DOM and the parent
+  // cannot reach into it, which is the whole point of the sandbox. A refetch of the
+  // route would work and is what the other two liveness frames do -- and it would
+  // throw away the page's own state (a chart's animation, a tree's scroll position,
+  // a 3D scene) on every value change, which is what the push exists to avoid.
+  useEffect(() => {
+    return subscribeDashboardFields(slug, (read) => {
+      // Same reason as the refetch answer above: an opaque origin cannot be named,
+      // and the post reaches this one frame's contentWindow with model-declared,
+      // already-redacted fields.
+      // nosemgrep: javascript.browser.security.wildcard-postmessage-configuration.wildcard-postmessage-configuration
+      frameRef.current?.contentWindow?.postMessage({ type: DATA_MESSAGE_TYPE, read }, '*')
+    })
+  }, [slug])
   // A pull request the page links to: this frame only, GitHub PR URLs only.
   useFrameOpenLink([frameRef])
   const { theme, colorTheme, themeVersion } = useTheme()
@@ -558,4 +611,4 @@ export default function CrewDynamicDashboard({ slug, member, displayName, onAct,
   )
 }
 
-export { ACT_MESSAGE_TYPE, DATA_MESSAGE_TYPE, READY_MESSAGE_TYPE, READY_TIMEOUT_MS }
+export { ACT_MESSAGE_TYPE, DATA_MESSAGE_TYPE, REFETCH_MESSAGE_TYPE, READY_MESSAGE_TYPE, READY_TIMEOUT_MS }

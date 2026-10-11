@@ -71,6 +71,7 @@ from kiro_crew.dashboard.handlers._shared import (
     _is_restricted_session,
     require_owner_dashboard_request,
 )
+from kiro_crew.dashboard.handlers.member_dashboard_fields import package_write_refusal
 from kiro_crew.dashboard.state import _normalize_slot_key
 from kiro_crew.executors import subprocess_executor
 from kiro_crew.hooks import FileTooLargeError, safe_read_file_bytes_with_identity, stat_identity
@@ -1448,6 +1449,29 @@ async def api_artifacts_create(request: web.Request) -> web.Response:
             is_mcp = request.headers.get("X-Internal-Secret") is not None
             actor = "agent" if is_mcp else "user"
 
+            # The same binding gate the update route asks, on the path a create
+            # that lands on an existing slug takes. One of the two is not enough:
+            # whichever went unasked is the spelling a worker would use.
+            refused = await _run_off_loop(
+                lambda: package_write_refusal(
+                    request,
+                    promoted_content if promoted_content is not None else body.get("content"),
+                    # `existing` is the artifact this create lands ON, so its own
+                    # content carries the binding that decides whether this slug may
+                    # be written.
+                    getattr(existing, "content", None),
+                )
+            )
+            if refused:
+                _audit(
+                    tool="artifact_create",
+                    request=request,
+                    outcome="denied",
+                    error="dashboard package binding",
+                    extra={"slug": existing.slug},
+                )
+                return _err(refused, status=403)
+
             # Pass through ALL supported fields (not just content).
             update_kwargs: dict[str, Any] = {
                 "content": promoted_content if promoted_content is not None else body.get("content"),
@@ -1509,6 +1533,21 @@ async def api_artifacts_create(request: web.Request) -> web.Response:
     if merr:
         _audit(tool="artifact_save", request=request, outcome="denied", error=merr)
         return _err(merr)
+    # The third write path: a package created under a slug nothing holds yet. Gated
+    # like the other two, so "create it somewhere new" is not the way past the rule.
+    # No stored binding is passed because there is none: this path is reached only
+    # after the dedupe branch above found no artifact to land on.
+    # OFF THE LOOP like its two siblings: the gate resolves the caller's slug through
+    # the roster, which loads the config from disk.
+    refused = await _run_off_loop(lambda: package_write_refusal(request, body.get("content"), None))
+    if refused:
+        _audit(
+            tool="artifact_save",
+            request=request,
+            outcome="denied",
+            error="dashboard package binding",
+        )
+        return _err(refused, status=403)
     folder_id, ferr = await _resolve_folder_ref_off_loop(body.get("folder"), create_missing=True)
     if ferr:
         _audit(tool="artifact_save", request=request, outcome="denied", error=ferr)
@@ -1718,6 +1757,20 @@ async def api_artifact_asset(request: web.Request) -> web.Response:
     )
 
 
+def _stored_content_for(slug: str) -> str | None:
+    """What *slug* holds now, or ``None`` when it holds nothing this caller can read.
+
+    For the binding gate only, which is why every failure is ``None`` rather than a
+    raise: an artifact that cannot be read carries no binding to authorize, and the
+    write that follows will meet the store's own refusal with its own reason. Blocking
+    file IO, so callers run it off the event loop.
+    """
+    try:
+        return get_default_store().get(slug).content
+    except Exception:
+        return None
+
+
 async def api_artifact_update(request: web.Request) -> web.Response:
     owner_denied = await _non_owner_refusal(request, "artifacts.artifact_update")
     if owner_denied is not None:
@@ -1809,6 +1862,28 @@ async def api_artifact_update(request: web.Request) -> web.Response:
                     extra={"slug": slug, "kind": str(raw_kind)[:32]},
                 )
                 return _err(msg)
+        # A DASHBOARD PACKAGE IS ITS OWNER'S. Asked before the write, because a
+        # worker that could write the package could write the page -- and the page
+        # runs script inside the frame that holds the owner's own fold values.
+        # Asked HERE rather than in the store because the rule needs the caller,
+        # and the store is handed content with no request behind it.
+        # WHAT THE SLUG HOLDS NOW is read first, because the stored binding is who the
+        # page belongs to: gating on the submitted one alone authorizes the caller
+        # against a claim the caller wrote, so a worker could rebind another
+        # crewmate's page to itself in a single update.
+        stored_content = await _run_off_loop(lambda: _stored_content_for(slug))
+        refused = await _run_off_loop(
+            lambda: package_write_refusal(request, body.get("content"), stored_content)
+        )
+        if refused:
+            _audit(
+                tool="artifact_update",
+                request=request,
+                outcome="denied",
+                error="dashboard package binding",
+                extra={"slug": slug},
+            )
+            return _err(refused, status=403)
         # OFF the event loop: update() writes current.html, a version snapshot
         # and -- for a linked artifact -- the source file itself, so running it
         # inline stalls the gateway for every other session on a large file or a

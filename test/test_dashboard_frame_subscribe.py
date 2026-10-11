@@ -102,7 +102,12 @@ def _run(bootstrap: str, read: dict[str, Any], page_js: str) -> list[Any]:
 
 def _read(**over: Any) -> dict[str, Any]:
     fields = over.pop("fields", {"boards": 2, "owner": "atlas"})
-    return dashboard_frame.read_payload(fields, **over)
+    version = over.pop("version", 0)
+    payload = dashboard_frame.read_payload(fields, **over)
+    # The host stamps every read it sends, so a harness that omitted it would test a
+    # document the product never composes.
+    payload["version"] = version
+    return payload
 
 
 class TestSubscribeOnFirstLoad:
@@ -284,3 +289,172 @@ def test_the_contract_is_documented_where_a_page_author_reads_it() -> None:
         "the module docstring lists the ways a value reaches a page and does not mention "
         "subscribe, so the only description of it is the code"
     )
+
+
+def _posted(bootstrap: str, read: dict[str, Any], page_js: str) -> list[Any]:
+    """What the page posted to its parent. The refetch request is a message, not a call."""
+    return _run(
+        bootstrap,
+        read,
+        "globalThis.parent.postMessage = (m) => __calls.push(m);\n" + page_js,
+    )
+
+
+class TestAPatchCarriesOnlyWhatMoved:
+    """The controller pushes the fields that changed and nothing else, which makes the
+    frame responsible for the half a partial push cannot carry.
+
+    Without a merge here, a push of one field would leave ``window.kirocrew.fields``
+    holding that field alone -- so a chart reading a second field would find
+    ``undefined`` and the host's own fill would mark every other cell missing. A page
+    would then go blank one field at a time, each push, with no state saying why.
+    """
+
+    def test_a_patch_keeps_the_fields_it_does_not_carry(self) -> None:
+        calls = _run(
+            dashboard_frame._BOOTSTRAP_JS,
+            _read(fields={"boards": 2, "owner": "atlas"}),
+            "__push({ patch: true, version: 1, fields: { boards: 5 }, agentic: [],"
+            "         seq: 2, stale: false, missing: [] });"
+            "__calls.push(window.kirocrew.fields.owner, window.kirocrew.fields.boards);",
+        )
+        assert calls == ["atlas", 5]
+
+    def test_a_patch_fires_only_the_subscribers_for_the_fields_it_carries(self) -> None:
+        """A page redrawing a 3D scene on a field it does not read is the cost a reader
+        pays for a callback that fires on every push."""
+        calls = _run(
+            dashboard_frame._BOOTSTRAP_JS,
+            _read(fields={"boards": 2, "owner": "atlas"}),
+            "window.kirocrew.subscribe('owner', (v) => __calls.push(['owner', v]));"
+            "window.kirocrew.subscribe('boards', (v) => __calls.push(['boards', v]));"
+            "__push({ patch: true, version: 1, fields: { boards: 5 }, agentic: [],"
+            "         seq: 2, stale: false, missing: [] });",
+        )
+        assert calls == [["owner", "atlas"], ["boards", 2], ["boards", 5]]
+
+    def test_a_full_read_replaces_rather_than_merges(self) -> None:
+        """A full read is the answer to a refetch, so it IS the whole truth: merging it
+        would keep a field the host has since dropped from the model and leave the page
+        drawing a value nothing will ever push again."""
+        calls = _run(
+            dashboard_frame._BOOTSTRAP_JS,
+            _read(fields={"boards": 2, "owner": "atlas"}),
+            "__push({ version: 7, fields: { boards: 5 }, agentic: [], seq: 2,"
+            "         stale: false, missing: [] });"
+            "__calls.push(window.kirocrew.fields.owner === undefined,"
+            "             window.kirocrew.fields.boards);",
+        )
+        assert calls == [True, 5]
+
+
+class TestAVersionGapRefetches:
+    def test_a_patch_that_skips_a_version_asks_for_a_full_read(self) -> None:
+        """A page that applied a patch it cannot place in order is a page showing one
+        field from after a change and the rest from before it, with nothing saying so.
+        The gap is the only thing that detects a dropped frame, so it asks for the whole
+        read rather than guessing at the hole."""
+        posted = _posted(
+            dashboard_frame._BOOTSTRAP_JS,
+            _read(fields={"boards": 2}),
+            "__push({ patch: true, version: 1, fields: { boards: 3 }, agentic: [],"
+            "         seq: 2, stale: false, missing: [] });"
+            "__push({ patch: true, version: 4, fields: { boards: 9 }, agentic: [],"
+            "         seq: 5, stale: false, missing: [] });",
+        )
+        assert [m["type"] for m in posted] == [dashboard_frame.REFETCH_MESSAGE_TYPE]
+        assert posted[0]["held"] == 1, "the host is not told which version the page holds"
+
+    def test_the_skipped_patch_is_not_applied(self) -> None:
+        """Asking for a refetch and applying the patch anyway would be the same wrong
+        page, reached one round trip later."""
+        calls = _run(
+            dashboard_frame._BOOTSTRAP_JS,
+            _read(fields={"boards": 2}),
+            "__push({ patch: true, version: 1, fields: { boards: 3 }, agentic: [],"
+            "         seq: 2, stale: false, missing: [] });"
+            "__push({ patch: true, version: 4, fields: { boards: 9 }, agentic: [],"
+            "         seq: 5, stale: false, missing: [] });"
+            "__calls.push(window.kirocrew.fields.boards);",
+        )
+        assert calls == [3]
+
+    def test_consecutive_patches_apply_without_asking(self) -> None:
+        posted = _posted(
+            dashboard_frame._BOOTSTRAP_JS,
+            _read(fields={"boards": 2}),
+            "for (const v of [1, 2, 3]) {"
+            "  __push({ patch: true, version: v, fields: { boards: v }, agentic: [],"
+            "           seq: v, stale: false, missing: [] });"
+            "}",
+        )
+        assert posted == []
+
+    def test_a_patch_after_a_gateway_restart_asks_for_a_whole_read(self) -> None:
+        """A restart restarts the host's counter, so the first patch after one is not
+        the page's next version. There is no exemption for that: a patch computed
+        against a read this page never held must not be applied, and the refetch costs
+        one round trip to replace the whole read instead."""
+        posted = _posted(
+            dashboard_frame._BOOTSTRAP_JS,
+            # The page was composed when the host's counter stood at 9.
+            _read(fields={"boards": 2}, version=9),
+            # The gateway restarted, so its counter is back near one.
+            "__push({ patch: true, version: 1, fields: { boards: 3 }, agentic: [],"
+            "         seq: 2, stale: false, missing: [] });",
+        )
+        assert [m["type"] for m in posted] == [dashboard_frame.REFETCH_MESSAGE_TYPE]
+        assert posted[0]["held"] == 9
+
+    def test_the_page_holds_the_version_the_island_carried(self) -> None:
+        """So the first patch is checked against the read the document was composed
+        from, rather than against nothing."""
+        posted = _posted(
+            dashboard_frame._BOOTSTRAP_JS,
+            _read(fields={"boards": 2}, version=9),
+            "__push({ patch: true, version: 10, fields: { boards: 3 }, agentic: [],"
+            "         seq: 2, stale: false, missing: [] });",
+        )
+        assert posted == []
+
+    def test_a_full_read_resets_the_version_the_page_holds(self) -> None:
+        """So the patch after a refetch is checked against the read that answered it."""
+        posted = _posted(
+            dashboard_frame._BOOTSTRAP_JS,
+            _read(fields={"boards": 2}),
+            "__push({ version: 9, fields: { boards: 3 }, agentic: [], seq: 2,"
+            "         stale: false, missing: [] });"
+            "__push({ patch: true, version: 10, fields: { boards: 4 }, agentic: [],"
+            "         seq: 3, stale: false, missing: [] });",
+        )
+        assert posted == []
+
+
+def test_the_refetch_type_matches_the_tab_that_answers_it() -> None:
+    """The page posts this and the browser tab is what turns it into a full read.
+
+    Mirrored across two languages, so a drift is silent in the worst way: the page
+    would ask forever and the tab would never hear it, leaving a dashboard applying
+    no patches and showing no error -- indistinguishable from a quiet crew.
+    """
+    tab = (
+        Path(dashboard_frame.__file__).resolve().parents[1]
+        / "website"
+        / "src"
+        / "pages"
+        / "members"
+        / "CrewDynamicDashboard.tsx"
+    )
+    if not tab.exists():  # pragma: no cover - a source checkout always has it
+        pytest.skip("the website source is not in this build")
+    text = tab.read_text(encoding="utf-8")
+    assert f"'{dashboard_frame.REFETCH_MESSAGE_TYPE}'" in text, (
+        "the tab does not carry the refetch type the frame posts, so a page that "
+        "cannot place a patch asks for a read nothing answers"
+    )
+    assert "REFETCH_MESSAGE_TYPE" in text
+
+
+def test_the_bootstrap_posts_the_type_the_constant_names() -> None:
+    """The literal inside the script and the exported name, pinned to each other."""
+    assert f'"{dashboard_frame.REFETCH_MESSAGE_TYPE}"' in dashboard_frame._BOOTSTRAP_JS
