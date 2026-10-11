@@ -1111,7 +1111,12 @@ A second HARD LINK on the weights is judged here instead, at the gate that verif
 them. `_verified_on_disk` opens the file once with `O_NOFOLLOW`, hashes it from that
 descriptor, and asks `sandbox.require_unaliased_model_file` about that same
 descriptor — so the inode judged and the inode hashed are one resolution, where a name
-check and a later `open` would be two. An alias refuses that LOAD and nothing else:
+check and a later `open` would be two. The question is asked BEFORE the first byte is
+read, and the inode's stamp (`st_ctime_ns`, `st_mtime_ns`, size, link count) must not
+move across the read: a check only at the end of the read loses a race in which a
+write through the alias lands in a chunk already hashed and the alias is then unlinked,
+so the final `fstat` sees one link while the digest still matches. A stamp that moves
+refuses the load the same way. An alias refuses that LOAD and nothing else:
 the bytes, the inode and both names are left as they are, because "unverified" would
 mean "download over it" (answering a condition only the operator can fix with a silent
 multi-gigabyte transfer) and deleting would remove one name of the operator's own file.

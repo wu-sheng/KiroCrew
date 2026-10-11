@@ -617,10 +617,11 @@ _CREW_READONLY_LEAVES: tuple[str, ...] = (
     # directory belongs under ``run`` as an ``extra_writable_dirs`` carve-out, as the
     # decision runtime's ``run/decisions/<id>`` does.
     # The seal covers paths, so check the live home's bounded set of loader files on
-    # every spawn that builds a new sandbox boundary, and every delegated Kiro
-    # hand-off; a nested spawn inherits an outer boundary that was checked when it
-    # was built. That is the namespace and Seatbelt backends below, and the
-    # hand-off. Refuse symlinks and junctions at every component from models down:
+    # every spawn that builds a new Kiro Crew sandbox boundary: the namespace and
+    # Seatbelt backends below. A nested spawn inherits an outer boundary that was
+    # checked when it was built. A delegated Kiro hand-off and an unconfined spawn
+    # are not checked: neither applies a Kiro Crew seal over models for an alias to
+    # defeat. Refuse symlinks and junctions at every component from models down:
     # a bind seals the referent while the name stays replaceable in a writable
     # parent. A hard link on a loader file is judged at the LOADER instead, on a
     # descriptor: ``stt.models.ModelStore._verified_on_disk`` (digest, then reopen) and
@@ -3092,10 +3093,14 @@ def require_unaliased_model_file(path: str, *, fd: int) -> None:
     sandboxed spawn on that host, which is the whole box for one file's exposure.
 
     What this does NOT close: an alias that existed earlier, was written through, and was
-    unlinked before the hash leaves a lone regular file holding forged bytes, and no
-    ``fstat`` rule can see that an inode once had a second name. The seal and the file-write
-    gate are what keep the agent from creating the alias at all; this is what stops bytes
-    being consumed through one that already exists.
+    unlinked before the check leaves a lone regular file holding forged bytes, and no
+    ``fstat`` rule can see that an inode once had a second name; the whisper digest catches
+    those bytes, and the GGUF has no digest at load. Nor does it see a descriptor opened
+    through such an alias and still held. The whisper verifier judges before its first read
+    and refuses an inode stamp that moves during the read, but a write through a held
+    descriptor after the hash and before the native loader reopens the path is not seen.
+    The seal and the file-write gate are what keep the agent from creating the alias at
+    all; this is what stops bytes being consumed through one that already exists.
     """
     _require_real_file_nofollow(
         path,

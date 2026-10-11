@@ -809,7 +809,7 @@ class TestModelLoaderPaths:
             os.unlink(result[-1])
         checked.assert_called_once_with()
 
-    def test_failed_darwin_delegation_checks_models_before_audit_and_on_seatbelt_fallback(
+    def test_failed_darwin_delegation_checks_models_once_on_the_seatbelt_fallback(
         self, crew, wrap_branch, monkeypatch
     ):
         # The hand-off itself does not check; when its audit fails, macOS falls
@@ -830,7 +830,7 @@ class TestModelLoaderPaths:
             os.unlink(cleanup)
         checked.assert_called_once_with()
 
-    def test_failed_windows_delegation_checks_models_then_fails_closed(
+    def test_failed_windows_delegation_fails_closed_without_a_model_check(
         self, crew, wrap_branch, monkeypatch
     ):
         # Windows has no Kiro Crew backend, so a failed delegation audit falls
@@ -1145,6 +1145,88 @@ class TestTheWhisperLoaderRefusesAnAliasedFile:
         opened = path.stat()
         assert seen["judged"][:4] == (opened.st_mode, opened.st_ino, opened.st_dev, opened.st_nlink)
 
+    @pytest.fixture
+    def racing_read(self, monkeypatch):
+        """Patch the hash loop's ``os.read`` to run *race* once, after the first chunk.
+
+        A small chunk size makes the pinned payload take several reads, so the race lands
+        in a chunk that is ALREADY hashed: the digest of what was read stays the pinned
+        one while the file itself changes.
+        """
+        from kiro_crew.stt import models
+
+        monkeypatch.setattr(models, "_CHUNK_BYTES", 4)
+        real_read = os.read
+        calls = {"reads": 0}
+
+        def arm(race):
+            def read(fd, size):
+                calls["reads"] += 1
+                if calls["reads"] == 2:
+                    race()
+                return real_read(fd, size)
+
+            monkeypatch.setattr(models.os, "read", read)
+            return calls
+
+        return arm
+
+    @pytest.mark.asyncio
+    async def test_an_alias_written_and_unlinked_mid_hash_refuses_before_any_read(
+        self, pinned, tmp_path, racing_read
+    ):
+        # The race a judgement only at the END of the read loses: write through the alias
+        # into a hashed chunk, unlink the alias, and the final fstat sees one link while
+        # the digest still matches the pin. Judged before the first read, the alias that
+        # exists when verification starts refuses, and no byte is read through it.
+        store, model, path, payload = pinned
+        alias = tmp_path / "alias"
+        os.link(path, alias)
+
+        def race():
+            with open(alias, "r+b") as handle:
+                handle.write(b"FORG")
+            alias.unlink()
+
+        calls = racing_read(race)
+
+        with pytest.raises(sandbox.SandboxCeilingUnsealable) as exc:
+            await store._verified_on_disk(model)
+
+        assert str(path) in str(exc.value)
+        assert calls["reads"] == 0
+        assert alias.exists(), "the race never ran, so the operator's alias is untouched"
+        assert path.read_bytes() == payload
+
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="POSIX change times; Windows has no Kiro Crew seal"
+    )
+    @pytest.mark.asyncio
+    async def test_a_write_through_a_held_descriptor_mid_hash_refuses_the_load(
+        self, pinned, racing_read
+    ):
+        # No alias exists when verification starts, but a descriptor opened through one
+        # earlier is still held. A write through it into a hashed chunk leaves the digest
+        # of what was read equal to the pin; the inode's stamp moved, so the load refuses
+        # and the file is left for the operator rather than deleted or downloaded over.
+        store, model, path, payload = pinned
+        old = 1_000_000_000 * 1_000_000_000
+        os.utime(path, ns=(old, old))
+        held = os.open(path, os.O_RDWR)
+        try:
+            calls = racing_read(lambda: os.pwrite(held, b"FORG", 0))
+
+            with pytest.raises(sandbox.SandboxCeilingUnsealable) as exc:
+                await store._verified_on_disk(model)
+        finally:
+            os.close(held)
+
+        assert calls["reads"] >= 2
+        assert str(path) in str(exc.value)
+        assert "changed while it was being verified" in str(exc.value)
+        assert path.is_file()
+        assert path.read_bytes() == b"FORG" + payload[4:]
+
 
 def _unreachable(*args, **kwargs):
     raise AssertionError("the load-time check must hash the descriptor it judges, not a name")
@@ -1219,7 +1301,13 @@ class TestASandboxedChildCannotMintAnAliasOfASealedLoaderFile:
         )
         try:
             done = subprocess.run(
-                argv, env=env, capture_output=True, text=True, encoding="utf-8", timeout=120
+                argv,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=120,
+                cwd=tmp_path,
             )
         finally:
             if cleanup is not None:
