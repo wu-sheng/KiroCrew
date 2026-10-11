@@ -287,6 +287,25 @@ export default function CrewProfilePanel(p: CrewProfilePanelProps) {
             {/* Face and name only: the id, the role and the activity line were
                 dropped from the head (they live in the pill and the editor). */}
             <div className="mt-1 text-[19px] font-bold tracking-tight text-text-strong leading-tight" data-testid="crew-profile-name">{name}</div>
+            {/* Fresh start: a small pill button under the name, where the
+                person is. A real button shape (border, filled background on
+                hover) rather than a bare caption-weight link, so a first-time
+                reader can tell it is a control before deciding whether to
+                risk it; muted colour and no danger tone keep it quiet. The
+                label carries the action alone: what survives the reset is the
+                confirm dialog's job, where the person is deciding. Held while
+                its own flow runs. */}
+            {p.onFreshStart && (
+              <button
+                type="button"
+                onClick={p.onFreshStart}
+                className="inline-flex items-center gap-1.5 h-7 px-3 mt-1 rounded-full border border-border bg-bg text-[12px] text-muted hover:bg-bg-hover hover:text-text transition-colors cursor-pointer focus-ring"
+                data-testid="crew-profile-fresh-start"
+              >
+                <RotateCcw size={12} aria-hidden="true" />
+                <span>{t('pages.membersPage.fresh_start')}</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={p.onEdit}
@@ -349,12 +368,6 @@ export default function CrewProfilePanel(p: CrewProfilePanelProps) {
                 <div className="rounded-2xl border border-border bg-bg overflow-hidden">
                   <Row icon={<NotebookPen size={16} />} tone="warn" label={t('pages.membersPage.notes_tab')} sub={t('pages.membersPage.profile_notes_sub')} onClick={() => push('notes')} testId="crew-profile-notes" />
                 </div>
-
-                {p.onFreshStart && (
-                  <div className="rounded-2xl border border-border bg-bg overflow-hidden" data-testid="crew-profile-fresh-start-group">
-                    <Row icon={<RotateCcw size={16} />} tone="info" label={t('pages.membersPage.fresh_start')} sub={t('pages.membersPage.fresh_start_hint')} onClick={p.onFreshStart} testId="crew-profile-fresh-start" />
-                  </div>
-                )}
 
                 {p.settingsBody}
               </div>

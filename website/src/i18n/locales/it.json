@@ -18162,14 +18162,14 @@
       "dashboard_frame_title": "Dashboard di {{crew}}",
       "dashboard_rendering": "Disegno della dashboard…",
       "back_to_roster": "Torna ai compagni",
-      "fresh_start": "Ricomincia da capo…",
+      "fresh_start": "Ricomincia da capo",
       "fresh_start_failed": "Non è stato possibile ricominciare da capo. La conversazione è rimasta.",
       "fresh_start_confirm_title": "Far ricominciare questo compagno da capo?",
       "fresh_start_confirm_body": "Quello che sta facendo si ferma e dimentica questa conversazione. I messaggi restano qui, ripiegati.",
       "fresh_start_confirm_action": "Ricomincia da capo",
-      "fresh_start_hint": "Avvia una nuova conversazione con questo compagno. I messaggi precedenti restano visibili.",
       "fresh_start_failed_queued": "Ci sono ancora messaggi in coda. Aspetta che finiscano, poi riprova Ricomincia da capo.",
-      "fresh_start_failed_busy": "Il compagno sta ancora lavorando e non si è fermato. Fermalo prima, poi riprova."
+      "fresh_start_failed_busy": "Il compagno sta ancora lavorando e non si è fermato. Fermalo prima, poi riprova.",
+      "fresh_start_unsaved_fold": "La conversazione è stata cancellata, ma l'ora del reset non è stata salvata. Dopo un ricaricamento i messaggi precedenti tornano visibili."
     },
     "tasksCapacityCard": {
       "title": "Attività e capacità",

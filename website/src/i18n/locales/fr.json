@@ -18162,14 +18162,14 @@
       "dashboard_frame_title": "Tableau de bord de {{crew}}",
       "dashboard_rendering": "Affichage du tableau de bord…",
       "back_to_roster": "Retour aux coéquipiers",
-      "fresh_start": "Repartir à zéro…",
+      "fresh_start": "Repartir à zéro",
       "fresh_start_failed": "Impossible de repartir à zéro. La conversation est conservée.",
       "fresh_start_confirm_title": "Faire repartir ce coéquipier à zéro ?",
       "fresh_start_confirm_body": "Ce qu'il fait s'arrête et il oublie cette conversation. Les messages restent ici, repliés.",
       "fresh_start_confirm_action": "Repartir à zéro",
-      "fresh_start_hint": "Démarre une nouvelle conversation avec ce coéquipier. Les messages précédents restent visibles.",
       "fresh_start_failed_queued": "Des messages sont encore en file. Attends qu'ils finissent, puis réessaie Repartir à zéro.",
-      "fresh_start_failed_busy": "Le coéquipier travaille encore et ne s'est pas arrêté. Arrête-le d'abord, puis réessaie."
+      "fresh_start_failed_busy": "Le coéquipier travaille encore et ne s'est pas arrêté. Arrête-le d'abord, puis réessaie.",
+      "fresh_start_unsaved_fold": "La conversation est effacée, mais l'heure de la remise à zéro n'a pas été enregistrée. Après un rechargement, les messages précédents se réaffichent."
     },
     "tasksCapacityCard": {
       "title": "Tâches et capacité",
