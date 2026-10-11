@@ -241,7 +241,13 @@ export const CHUNK_BUDGETS = {
   // set from a stale-low pre-merge build and never had headroom. Back to the ~5%
   // convention over the true merged measurement (2,041,857 B * 1.05 = 2,143,950 B),
   // so ordinary first-party growth does not re-trip this on the next PR.
-  App: 2094 * KB, // measured 2,041,857 B on main @ 2d4278a18 with route-only pages lazy (~5% headroom)
+  // That margin is spent: main now builds this chunk at 2,144,170 B, 86 B under
+  // the 2094 KB ceiling. The per-row session mute adds 1,238 B net (its
+  // session-menu item, the shared mute toggle path, the dashboard reducer pair
+  // and the sidebar marker), all in the shell and chat route this chunk loads
+  // eagerly, so there is no lazy boundary to move it behind. Back to the ~5%
+  // convention over the measurement with it (2,145,408 B * 1.05 = 2,252,678 B).
+  App: 2200 * KB, // measured 2,145,408 B with the per-row session mute (~5% headroom)
 
   // Markdown/math/syntax rendering stack (katex, highlight.js, remark/rehype)
   // -- one deliberate `codeSplitting` group, see vite.config.ts.
