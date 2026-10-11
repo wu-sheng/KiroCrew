@@ -3183,9 +3183,35 @@ class TestMemberBriefingEndpoint:
             "updated_ts",
             "redacted",
             "truncated",
+            "upkeep",
         }
         assert data["redacted"] is False
         assert data["truncated"] is False
+
+    @pytest.mark.asyncio
+    async def test_the_upkeep_skill_is_the_one_the_crewmate_is_pointed_at(self, tmp_path):
+        """Same renderer as the pointer's skill, so the person reads exactly what the
+        crewmate reads -- and not the briefing read, so it is there even where notes
+        cannot be read."""
+        from kiro_crew import dashboard_agentic, dashboard_upkeep
+
+        state = _make_state(tmp_path)
+        with (
+            _patched_config([CREW]),
+            patch("kiro_crew.members.member_briefing_supported", return_value=False),
+        ):
+            async with TestClient(TestServer(_make_members_app(state))) as client:
+                resp = await client.get(
+                    "/api/members/code-reviewer/briefing", params={"member": CREW}
+                )
+                assert resp.status == 200
+                data = await resp.json()
+        upkeep = data["upkeep"]
+        skill = dashboard_upkeep.skill_dir("code-reviewer") / "SKILL.md"
+        assert upkeep["skill"] == skill.read_text(encoding="utf-8")
+        assert upkeep["pointer"] == dashboard_upkeep.pointer(skill)
+        assert upkeep["pointer"] in dashboard_agentic.turn_block("code-reviewer")
+        assert upkeep["scripts"] == ["project_report_ci.py"]
 
     @pytest.mark.asyncio
     async def test_no_briefing_yet_is_empty_not_404(self, tmp_path):

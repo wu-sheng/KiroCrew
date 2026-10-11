@@ -1998,6 +1998,10 @@ async def api_member_briefing(request: web.Request) -> web.Response:
     fails closed to ``""`` and the panel explains that from the flag rather
     than presenting an empty briefing as "no notes yet". ``updated_ts`` is the
     file's own mtime (epoch seconds) or ``null`` when there is no file.
+    ``upkeep`` is the SYSTEM-owned text beside it: the crewmate's generated
+    dashboard upkeep skill (:func:`dashboard_upkeep.view` -- the pointer line its
+    ``[DASHBOARD]`` block carries, the skill text and its helper script names), or
+    ``null`` when it has no page.
     ``redacted`` and ``truncated`` each say the wire text shows less than the
     file holds (a secret replaced by its placeholder; a tail past the cap not
     shown), so the panel can say so above the notes instead of leaving
@@ -2094,6 +2098,12 @@ async def api_member_briefing(request: web.Request) -> web.Response:
     # can say so above the notes: ``redacted`` when a placeholder replaced a
     # secret, ``truncated`` when the marker stands in for the tail.
     redacted = bool(url_hits or cred_hits)
+    # The system-owned half of what the crewmate is told about its page: the upkeep
+    # skill its [DASHBOARD] pointer names, rendered by the one function the prompt
+    # path syncs from. Not the briefing read, so it does not depend on `supported`.
+    from kiro_crew import dashboard_upkeep
+
+    upkeep = await asyncio.to_thread(dashboard_upkeep.view, slug)
 
     # Audit the disclosure, as the rules read does: WHO read a crewmate's
     # private notes matters as much as who was refused, and a denied-only
@@ -2119,6 +2129,7 @@ async def api_member_briefing(request: web.Request) -> web.Response:
             "updated_ts": updated_ts,
             "redacted": redacted,
             "truncated": truncated,
+            "upkeep": upkeep,
         }
     )
 
