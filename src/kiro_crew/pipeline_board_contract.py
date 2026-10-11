@@ -510,8 +510,14 @@ def _derive_numbers(
                 "cards": [_card(item, judgment) for item in by_state.get(state, [])],
             }
         )
+    # Closed items the fold has let go (past ``WORK_CLOSED_WINDOW``) are still this
+    # board's work: their per-state counts ride in ``forgotten`` and join the segments
+    # and the total, so a long board's progress covers its whole life. They have no
+    # cards -- the columns show what the fold still holds.
+    forgotten = _forgotten_counts(view)
     segments: list[PipelineBoardSegment] = [
-        {"name": state, "n": len(by_state.get(state, []))} for state in BOARD_COLUMN_NAMES
+        {"name": state, "n": len(by_state.get(state, [])) + forgotten.get(state, 0)}
+        for state in BOARD_COLUMN_NAMES
     ]
     return {
         # DERIVED FROM THE ROUND, which is why the card does not print it. Printed beside the
@@ -530,12 +536,24 @@ def _derive_numbers(
             # neither. The drops reach the reader as their own count instead, which is
             # the honest place for them: they are a fact about the LOG, not about the
             # board's work.
-            "total": len(items),
+            "total": len(items) + forgotten.get("items", 0),
             "added_since": added,
             "segments": segments,
         },
         "omitted": view["omitted"],
     }
+
+
+def _forgotten_counts(view: WorkBoardView) -> dict[str, int]:
+    """The view's ``forgotten`` counts, each a non-negative int, 0 when absent or bad."""
+    raw = view.get("forgotten")
+    if not isinstance(raw, dict):
+        return {}
+    counts: dict[str, int] = {}
+    for key, value in raw.items():
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            counts[str(key)] = value
+    return counts
 
 
 def _card(item: WorkBoardItem, judgment: PipelineBoardJudgment) -> PipelineBoardCard:
@@ -1251,9 +1269,10 @@ def panel_card_data(panel: PipelineBoardPanel) -> dict[str, str]:
        ``column_0_``. ``stats`` is keyed by its own ``k`` instead of by position, so a
        tile's label can be literal text in the page.
     3. A list whose length is UNBOUNDED collapses to one text field on its parent, its
-       elements newline-separated: a board holds up to
-       :data:`~kiro_crew.work_vocab.WORK_STORED_ITEM_LIMIT` items and the host drops a
-       card over 24 fields whole, so ``columns[0].cards`` is ``column_0_rows``.
+       elements newline-separated: a column holds as many items as the fold keeps
+       (open items plus :data:`~kiro_crew.work_vocab.WORK_CLOSED_WINDOW` closed) and the
+       host drops a card over 24 fields whole, so ``columns[0].cards`` is
+       ``column_0_rows``.
     4. A leaf the page renders as part of a SENTENCE has no field of its own and reaches
        the card inside the finished sentence: ``meta.age_seconds`` is in ``meta_when``,
        ``progress.total`` is in ``progress_legend`` and in every ``column_N_head``. A

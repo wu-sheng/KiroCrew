@@ -223,6 +223,7 @@ Moved by: `work/recorded`.
 | Field | Type | Optional |
 |---|---|---|
 | `conductor` | `dict` | no |
+| `forgotten` | `dict` | no |
 | `items` | `list` | no |
 | `omitted` | `int` | no |
 

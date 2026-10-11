@@ -267,6 +267,27 @@ def test_items_are_grouped_by_their_own_state() -> None:
     assert counts["open"] == 1 and counts["accepted"] == 2 and counts["rejected"] == 0
 
 
+def test_forgotten_closed_items_join_the_progress_but_draw_no_cards() -> None:
+    """A long board's progress covers its whole life: the closed items the fold let
+    go add to the total and to their state's segment, and the columns still show
+    only what the fold holds."""
+    view = _view([_item("it_0", "open"), _item("it_1", "accepted")])
+    view["forgotten"] = {
+        "created": 300,
+        "items": 298,
+        "accepted": 290,
+        "rejected": 5,
+        "abandoned": 3,
+    }
+    panel = _build(view)
+    counts = {seg["name"]: seg["n"] for seg in panel["progress"]["segments"]}
+    assert panel["progress"]["total"] == 300
+    assert counts == {"open": 1, "accepted": 291, "rejected": 5, "abandoned": 3}
+    assert sum(counts.values()) == panel["progress"]["total"]
+    cards = sum(len(column["cards"]) for column in panel["columns"])
+    assert cards == 2
+
+
 def test_a_pull_request_number_becomes_the_row_id() -> None:
     panel = _build(_view([_item("it_0", pr=14111)]))
     ids = [card["id"] for col in panel["columns"] for card in col["cards"]]

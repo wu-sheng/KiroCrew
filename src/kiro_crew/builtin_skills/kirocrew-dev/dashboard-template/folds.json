@@ -608,6 +608,11 @@
           "optional": false
         },
         {
+          "name": "forgotten",
+          "type": "dict",
+          "optional": false
+        },
+        {
           "name": "items",
           "type": "list",
           "optional": false
