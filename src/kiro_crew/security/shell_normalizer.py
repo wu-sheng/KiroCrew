@@ -698,8 +698,12 @@ def _pipes_into_evaluator(tokens: "list[str]") -> bool:
 
 
 # Constructs by which a text-processing tool RUNS a command rather than printing it:
-# ``awk``'s ``system()`` and pipe-to-command, and GNU ``sed``'s ``e`` flag.
-_SCRIPT_EXECUTES_RE = re.compile(r"system\s*\(|\|\s*[\"']|\|&|print\s*\||\bclose\s*\(|/e\b|\be\s*$")
+# ``awk``'s ``system()`` and pipe-to-command, and GNU ``sed``'s ``e`` flag.  The ``e``
+# command is a word of the script (``e``, ``p;e``, ``--expression=e``), never the
+# ``-e``/``-E`` option itself, which no data consumer reads as running a command.
+_SCRIPT_EXECUTES_RE = re.compile(
+    r"system\s*\(|\|\s*[\"']|\|&|print\s*\||\bclose\s*\(|/e\b|(?<![\w-])e\s*$"
+)
 
 
 def _stdin_redirect_carriers(tokens: list[str], start: int, stop: int) -> "Iterator[str]":

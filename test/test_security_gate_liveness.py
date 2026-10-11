@@ -238,7 +238,13 @@ def _url_payload_command(n: int) -> str:
 #: other branches' start search guards the Telegram branch so a long digit run is
 #: walked once, not once per digit, and the JWT start keeps its run's end so an
 #: overlapping match does not re-walk that run. No pattern moved and no pass changed.
-_PACKAGE_LINE_BUDGET = 28_827
+#:
+#: Raised again, from 28,827, for ``shell_normalizer._SCRIPT_EXECUTES_RE``: its sed
+#: ``e`` branch reads the ``e`` command as a word of the script, not the bare
+#: ``-e``/``-E`` option, so a ``grep -E`` over a product-named directory keeps the
+#: data-consumer exemption. The regex wraps to two lines and its comment names the
+#: rule. Every execute construct it read before is still read; no other pattern moved.
+_PACKAGE_LINE_BUDGET = 28_831
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
